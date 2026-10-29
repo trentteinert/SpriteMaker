@@ -10,6 +10,16 @@ npm run dist       # build an installer for your OS into dist/ (AppImage/deb, NS
 npm run web        # or serve it in a browser at http://localhost:8000
 ```
 
+## The workflow: one sprite → a complete game sprite sheet
+1. Draw your idle character or object on a canvas with some empty room around it.
+2. Split it into parts: select the head (M) → **J** (lift to new layer) → name it; repeat for arms, legs, weapon.
+3. **Generate ▸ Full sprite set** (▦ Full set): tick the animations you want (idle, walk, run, jump, attack, hurt, death),
+   set frame counts, Generate. Each animation gets its own tag. Use **Animation starter** instead when you want to tune one
+   animation with a live preview and edit the joints.
+4. Play with Enter, paint over the generated poses to clean them up (onion skin is on).
+5. **File ▸ Export** → *PNG sprite sheet + JSON* with layout **One row per tag**: one row per animation, plus JSON with each
+   animation's row, frame rectangles, durations, loop flag and the sprite pivot (Aseprite-style `frameTags` are included too).
+
 ## The basics
 Pencil, eraser, line, rectangle, ellipse, fill, eyedropper, rectangular selection (drag to move; copy/cut/paste;
 arrow-key nudge), brush size/shape, mirror drawing (X/Y), palettes (DB32, PICO-8, Game Boy…), layers with

@@ -207,6 +207,15 @@ test('hurt flash whitens the first frame only; strength 0 leaves the sprite unto
   const z = SM.anim.build(d, 0, 'attack', { count: 6, ms: 80, dir: 1, method: 'nearest', strength: 0 }, rig);
   eq(z.every((f) => f.cels.every((c, l) => JSON.stringify(Array.from(c)) === JSON.stringify(Array.from(d.cel(0, l))))), true);
 });
+test('death keeps every part on the canvas (nothing clipped while toppling)', () => {
+  for (const dir of [1, -1]) {
+    const d = stickman(); d.resize(48, 40, 0.5, 1);
+    const rig = SM.anim.rigFor(d, 0), fr = SM.anim.build(d, 0, 'death', { count: 8, ms: 100, dir, method: 'rotsprite' }, rig);
+    const count = (cels) => cels.map((c) => c.filter((v, i) => i % 4 === 3 && v).length);
+    const before = count(d.frames[0].cels);
+    count(fr[7].cels).forEach((n, l) => { if (n < before[l] * 0.9) throw new Error('dir ' + dir + ' layer ' + l + ' lost pixels: ' + n + ' of ' + before[l]); });
+  }
+});
 test('animStarter inserts frames after the source, tags them and remembers the rig', () => {
   const d = stickman(), h = new SM.History(d), rig = SM.anim.rigFor(d, 0);
   const r = SM.gen.animStarter({ doc: d, hist: h, frame: 0, layer: 0, sel: null }, 'run', { count: 6, ms: 70, dir: 1, method: 'nearest', rig, tagName: 'run' });
@@ -215,6 +224,15 @@ test('animStarter inserts frames after the source, tags them and remembers the r
   const e = SM.deserialize(JSON.parse(JSON.stringify(SM.serialize(d))));
   eq(e.layers[1].role, 'legN'); eq(e.layers[1].joint, { x: 16, y: 21 });
   h.undo(); eq(d.frames.length, 1);
+});
+test('fullSet lays out every animation back to back with its own tag', () => {
+  const d = stickman(), h = new SM.History(d), rig = SM.anim.rigFor(d, 0);
+  SM.gen.fullSet({ doc: d, hist: h, frame: 0, layer: 0, sel: null },
+    [{ id: 'idle', count: 4, ms: 200 }, { id: 'walk', count: 6, ms: 100 }, { id: 'jump', count: 8, ms: 90 }], { dir: 1, strength: 100, method: 'nearest', rig });
+  eq(d.frames.length, 1 + 4 + 6 + 8);
+  eq(d.tags, [{ name: 'idle', from: 1, to: 4 }, { name: 'walk', from: 5, to: 10 }, { name: 'jump', from: 11, to: 18 }]);
+  eq([d.frames[1].duration, d.frames[6].duration, d.frames[12].duration], [200, 100, 90]);
+  h.undo(); eq([d.frames.length, d.tags.length], [1, 0]);
 });
 test('gif encoder emits a valid-looking file', () => {
   const f = [make(4, 4, [[1, 1]]), make(4, 4, [[2, 2]])];

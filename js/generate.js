@@ -118,17 +118,32 @@
 
   // Animation starter: poses the layers (as body parts) into the frames of a preset and inserts
   // them after the current frame. o.rig = { roles, joints } is remembered on the layers.
-  gen.animStarter = function (ctx, id, o) {
-    const d = ctx.doc, src = ctx.frame, rig = o.rig;
-    const frames = SM.anim.build(d, src, id, o, rig);
-    ctx.hist.commit();
-    d.layers.forEach((L, l) => { L.role = rig.roles[l]; L.joint = { ...rig.joints[l] }; });
+  function insertPreset(ctx, id, o, at) {
+    const d = ctx.doc, frames = SM.anim.build(d, ctx.frame, id, o, o.rig);
     frames.forEach((f, i) => {
-      const idx = d.addFrame(src + 1 + i, null, f.duration);
+      const idx = d.addFrame(at + i, null, f.duration);
       f.cels.forEach((c, l) => d.setCel(idx, l, c));
     });
-    d.tags.push({ name: o.tagName || id, from: src + 1, to: src + frames.length });
-    return { frame: src + 1, layer: ctx.layer, sel: null };
+    d.tags.push({ name: o.tagName || id, from: at, to: at + frames.length - 1 });
+    return frames.length;
+  }
+  function rememberRig(d, rig) { d.layers.forEach((L, l) => { L.role = rig.roles[l]; L.joint = { ...rig.joints[l] }; }); }
+
+  gen.animStarter = function (ctx, id, o) {
+    ctx.hist.commit();
+    rememberRig(ctx.doc, o.rig);
+    insertPreset(ctx, id, o, ctx.frame + 1);
+    return { frame: ctx.frame + 1, layer: ctx.layer, sel: null };
+  };
+
+  // Whole sprite set in one go: every entry of `list` ({ id, count, ms }) is generated from the current
+  // frame and laid out one after another, each with its own tag. o: { dir, strength, method, rig, flash }.
+  gen.fullSet = function (ctx, list, o) {
+    ctx.hist.commit();
+    rememberRig(ctx.doc, o.rig);
+    let at = ctx.frame + 1;
+    for (const e of list) at += insertPreset(ctx, e.id, { ...o, count: e.count, ms: e.ms, tagName: e.id }, at);
+    return { frame: ctx.frame + 1, layer: ctx.layer, sel: null };
   };
 
   // Appends the frames in reverse (excluding both ends) so a clip plays forward then back.

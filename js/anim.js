@@ -158,12 +158,14 @@
       info: 'Recoil, then the whole body topples backward about the feet.',
       pose(t, c) {
         const u = c.dir, k = c.k;
+        // Lying down, the body spans H pixels behind the feet; shift it just enough to stay on the canvas.
+        const fit = u === 1 ? Math.max(0, c.H - c.fx + 1) : -Math.max(0, c.fx + c.H + 1 - c.w);
         return keyed([
           { t: 0 },
           { t: 0.15, root: { dx: -u * 2 * k }, parts: { head: { rot: -u * 12 } } },
-          { t: 0.45, root: { dx: -u * 5 * k, rot: -u * 50 }, ease: 'in' },
-          { t: 0.7, root: { dx: -u * 9 * k, rot: -u * 85 }, ease: 'in' },
-          { t: 1, root: { dx: -u * 10 * k, rot: -u * 90 } },
+          { t: 0.45, root: { dx: fit * 0.5 - u * 2 * k, rot: -u * 50 }, ease: 'in' },
+          { t: 0.7, root: { dx: fit * 0.9, rot: -u * 85 }, ease: 'in' },
+          { t: 1, root: { dx: fit, rot: -u * 90 } },
         ], t);
       },
     },
@@ -174,10 +176,15 @@
     const part = pose.parts[role === 'weapon' && !pose.parts.weapon ? 'armN' : role] || {}, r = pose.root;
     let c = cel;
     if (part.rot) c = SM.rotate(c, w, h, part.rot, joint.x, joint.y, method);
-    if (r.rot) c = SM.rotate(c, w, h, r.rot, rig.feet.x, rig.feet.y, method);
-    if (r.sy !== 1) c = SM.scaleAbout(c, w, h, 1, r.sy, rig.feet.x, rig.feet.y);
+    // Move first, then rotate/scale about the moved feet: same result as rotating first, but
+    // nothing is clipped while it passes outside the canvas.
+    const rdx = Math.round(r.dx || 0), rdy = Math.round(r.dy || 0);
     const dx = Math.round((part.dx || 0) + (r.dx || 0)), dy = Math.round((part.dy || 0) + (r.dy || 0));
-    return dx || dy ? SM.translate(c, w, h, dx, dy) : c === cel ? new Uint8ClampedArray(cel) : c;
+    if (dx || dy) c = SM.translate(c, w, h, dx, dy);
+    const fx = rig.feet.x + rdx, fy = rig.feet.y + rdy;
+    if (r.rot) c = SM.rotate(c, w, h, r.rot, fx, fy, method);
+    if (r.sy !== 1) c = SM.scaleAbout(c, w, h, 1, r.sy, fx, fy);
+    return c === cel ? new Uint8ClampedArray(cel) : c;
   }
 
   // Builds the frames of preset `id` from frame `src`. o: { count, ms, dir, strength (percent), method, flash }.
@@ -187,7 +194,7 @@
     const out = [];
     for (let i = 0; i < n; i++) {
       const t = pre.loop ? i / n : i / (n - 1);
-      const p = pre.pose(t, { k: rig.k, dir: o.dir || 1 });
+      const p = pre.pose(t, { k: rig.k, dir: o.dir || 1, H: rig.height, fx: rig.feet.x, w: doc.w });
       const sc = (v) => (v || 0) * s;
       const pose = { root: { dx: sc(p.root.dx), dy: sc(p.root.dy), rot: sc(p.root.rot), sy: 1 + ((p.root.sy || 1) - 1) * s }, parts: {} };
       for (const r in p.parts) pose.parts[r] = { rot: sc(p.parts[r].rot), dx: sc(p.parts[r].dx), dy: sc(p.parts[r].dy) };

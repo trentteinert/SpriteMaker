@@ -44,28 +44,44 @@
     return toBlob(canvasOf(d, doc.w * scale, doc.h * scale));
   };
 
-  // layout: 'row' | 'column' | 'grid' (cols columns). Returns { blob, json }.
+  // layout: 'row' | 'column' | 'grid' (cols columns) | 'tags' (one row per tag). Returns { blob, json }.
   io.sheet = async function (doc, o) {
-    const [a, b] = io.frameRange(doc, o.tag);
-    const n = b - a + 1, s = o.scale, pad = o.pad;
-    const cols = o.layout === 'row' ? n : o.layout === 'column' ? 1 : Math.min(n, Math.max(1, o.cols));
-    const rows = Math.ceil(n / cols);
-    const cw = doc.w * s, ch = doc.h * s;
+    const s = o.scale, pad = o.pad, cw = doc.w * s, ch = doc.h * s;
+    let cells; // [{ f: frame index, col, row, name }]
+    let cols, rows;
+    if (o.layout === 'tags' && doc.tags.length) {
+      cells = [];
+      doc.tags.forEach((t, r) => { for (let f = t.from; f <= t.to; f++) cells.push({ f, col: f - t.from, row: r, name: t.name + '_' + (f - t.from) }); });
+      cols = Math.max(...doc.tags.map((t) => t.to - t.from + 1)); rows = doc.tags.length;
+    } else {
+      const [a, b] = io.frameRange(doc, o.tag), n = b - a + 1;
+      cols = o.layout === 'row' || o.layout === 'tags' ? n : o.layout === 'column' ? 1 : Math.min(n, Math.max(1, o.cols));
+      rows = Math.ceil(n / cols);
+      cells = Array.from({ length: n }, (_, i) => ({ f: a + i, col: i % cols, row: Math.floor(i / cols), name: o.name + ' ' + (a + i) }));
+    }
     const W = cols * cw + (cols + 1) * pad, H = rows * ch + (rows + 1) * pad;
     const sheet = SM.blank(W, H), frames = [];
-    for (let i = 0; i < n; i++) {
-      const img = upscale(doc.composite(a + i), doc.w, doc.h, s);
-      const ox = pad + (i % cols) * (cw + pad), oy = pad + Math.floor(i / cols) * (ch + pad);
+    for (const c of cells) {
+      const img = upscale(doc.composite(c.f), doc.w, doc.h, s);
+      const ox = pad + c.col * (cw + pad), oy = pad + c.row * (ch + pad);
       for (let y = 0; y < ch; y++) sheet.set(img.subarray(y * cw * 4, (y + 1) * cw * 4), ((oy + y) * W + ox) * 4);
-      frames.push({ filename: o.name + ' ' + (a + i), frame: { x: ox, y: oy, w: cw, h: ch }, duration: doc.frames[a + i].duration });
+      frames.push({ filename: c.name, frame: { x: ox, y: oy, w: cw, h: ch }, duration: doc.frames[c.f].duration });
     }
+    const byTag = o.layout === 'tags' && doc.tags.length;
     const json = {
       frames,
       meta: {
-        app: 'SpriteMaker', size: { w: W, h: H }, scale: String(s),
+        app: 'SpriteMaker', size: { w: W, h: H }, scale: String(s), frameSize: { w: cw, h: ch },
         pivot: { x: doc.pivot.x * s, y: doc.pivot.y * s },
-        frameTags: doc.tags.map((t) => ({ name: t.name, from: t.from - a, to: t.to - a, direction: 'forward' }))
-          .filter((t) => t.from >= 0 && t.to < n),
+        frameTags: byTag
+          ? doc.tags.map((t) => ({ name: t.name, from: 0, to: t.to - t.from, direction: 'forward' }))
+          : doc.tags.map((t) => ({ name: t.name, from: t.from - cells[0].f, to: t.to - cells[0].f, direction: 'forward' })).filter((t) => t.from >= 0 && t.to < cells.length),
+        // Engine-friendly summary: row, frame rectangles and per-frame timing for each animation.
+        animations: byTag ? Object.fromEntries(doc.tags.map((t, r) => [t.name, {
+          row: r, frames: t.to - t.from + 1, loop: ['idle', 'walk', 'run'].includes(t.name),
+          durations: doc.frames.slice(t.from, t.to + 1).map((fr) => fr.duration),
+          rects: Array.from({ length: t.to - t.from + 1 }, (_, i) => ({ x: pad + i * (cw + pad), y: pad + r * (ch + pad), w: cw, h: ch })),
+        }])) : undefined,
       },
     };
     return { blob: await toBlob(canvasOf(sheet, W, H)), json };

@@ -242,6 +242,8 @@
       o.querySelector('input').onpointerdown = () => ed.commit();
       g = grp();
       g.style.borderRight = '0';
+      const b8 = btn(g, '▦ Full set', 'Generate every essential animation at once', () => dlgFullSet());
+      b8.style.cssText = 'border-color: var(--accent); color: var(--accent); font-weight: 600';
       const b9 = btn(g, '★ Animate', 'Animation starter: walk, run, jump, attack… from your idle sprite', () => dlgStarter());
       b9.style.cssText = 'border-color: var(--accent); color: var(--accent); font-weight: 600';
       const b0 = btn(g, '⟲ Side turn', 'Spin a side/front-view sprite in 3D', () => dlgTurn());
@@ -442,7 +444,7 @@
       { key: 'scale', label: 'Scale', type: 'select', value: '1', options: [1, 2, 3, 4, 6, 8].map((n) => [n, n + 'x']) },
       { key: 'tag', label: 'Frames', type: 'select', value: -1, options: [[-1, 'All frames'], ...d.tags.map((t, i) => [i, `Tag: ${t.name} (${t.from + 1}–${t.to + 1})`])] },
       { type: 'info', text: 'Sprite sheet options:' },
-      { key: 'layout', label: 'Layout', type: 'select', value: 'row', options: [['row', 'Horizontal strip'], ['column', 'Vertical strip'], ['grid', 'Grid']] },
+      { key: 'layout', label: 'Layout', type: 'select', value: d.tags.length ? 'tags' : 'row', options: [['tags', 'One row per tag (animation) — best for games'], ['row', 'Horizontal strip'], ['column', 'Vertical strip'], ['grid', 'Grid']] },
       { key: 'cols', label: 'Grid columns', type: 'number', value: 4, min: 1, max: 64 },
       { key: 'pad', label: 'Padding (px)', type: 'number', value: 0, min: 0, max: 16 },
       { key: 'name', label: 'File name', type: 'text', value: 'sprite' },
@@ -660,6 +662,31 @@
     if (!ed.onion.on) { ed.onion.on = true; syncChecks(); ed.requestDraw(); }
   }
 
+  // ---------------------------------------------------------------- full sprite set
+  const SET_DEFAULTS = [['idle', 4, 220], ['walk', 6, 110], ['run', 6, 80], ['jump', 8, 90], ['attack', 6, 75], ['hurt', 4, 90], ['death', 8, 110]];
+  async function dlgFullSet() {
+    const d = ed.doc, src = ed.frame, PRE = SM.anim.PRESETS;
+    if (!d.frames[src].cels.some((c) => SM.bounds(c, d.w, d.h))) { msg('Draw your idle sprite on this frame first'); return; }
+    const rig = SM.anim.rigFor(d, src), limbs = rig.roles.some((r) => /^(arm|leg)/.test(r));
+    const fields = [
+      { type: 'info', text: `Generates a whole game set from this frame (your idle pose) in one go: each animation gets its own tag. ${limbs ? '' : '<b>Heads up:</b> only one body part is set up, so limbs will not move. Split off the head, arms and legs with Select + J first (see Animation starter). '}Then use File ▸ Export with “One row per tag”.` },
+      ...SET_DEFAULTS.flatMap(([id, n]) => [{ key: 'on_' + id, label: PRE[id].name, type: 'check', value: true }, { key: 'n_' + id, label: '   frames', type: 'number', value: n, min: 2, max: 24 }]),
+      { key: 'dir', label: 'Character faces', type: 'select', value: 1, options: [[1, 'Right'], [-1, 'Left']] },
+      { key: 'strength', label: 'Strength (%)', type: 'number', value: 100, min: 10, max: 250, step: 10 },
+      { key: 'method', label: 'Rotation method', type: 'select', value: 'rotsprite', options: METHODS },
+      { key: 'flash', label: 'White flash on hit', type: 'check', value: true },
+      { type: 'info', text: 'Leave empty canvas around the sprite — jumps and falls are clipped at the canvas edge (Sprite ▸ Canvas size).' },
+    ];
+    const r = await form('Build full sprite set', fields, 'Generate all');
+    if (!r) return;
+    const list = SET_DEFAULTS.filter(([id]) => r['on_' + id]).map(([id, , ms]) => ({ id, count: Math.round(r['n_' + id]), ms }));
+    if (!list.length) return;
+    ed.stop();
+    ed.adopt(SM.gen.fullSet(ed.ctx(), list, { dir: +r.dir, strength: r.strength, method: r.method, flash: r.flash, rig }));
+    const total = list.reduce((a, e) => a + e.count, 0);
+    msg(`${list.length} animations / ${total} frames created — File ▸ Export ▸ “One row per tag” gives the game sheet`);
+  }
+
   async function liftSelection() {
     if (!ed.sel) { msg('Select an area first (M), then press J to lift it onto its own layer'); return; }
     const r = await form('Lift selection to a new layer', [
@@ -729,7 +756,7 @@
       ['New tag…', () => tagDialog()], ['Play / pause', () => ed.toggle(), 'Enter'],
     ]],
     ['Generate', [
-      ['Animation starter (walk, run, jump, attack…)…', dlgStarter], '-',
+      ['Full sprite set (all animations at once)…', dlgFullSet], ['Animation starter (one animation, with preview)…', dlgStarter], '-',
       ['Side-view turn (3D, for side/front sprites)…', dlgTurn], ['Top-down rotation frames (in-plane)…', dlgTurntable], ['Top-down stack rotation (layers as height)…', dlgStack], '-', ['Motion tween (limb / bob)…', dlgTween],
     ]],
     ['View', [
