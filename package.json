@@ -4,7 +4,43 @@
   "description": "Pixel art editor with built-in rotation and animation generators",
   "private": true,
   "scripts": {
-    "start": "python3 -m http.server 8000",
-    "test": "node test/run.js"
+    "start": "electron .",
+    "web": "python3 -m http.server 8000",
+    "test": "node test/run.js",
+    "dist": "electron-builder"
+  },
+  "main": "electron/main.js",
+  "build": {
+    "appId": "com.spritemaker.app",
+    "productName": "SpriteMaker",
+    "files": [
+      "index.html",
+      "css/**",
+      "js/**",
+      "electron/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Graphics"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.graphics-design"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
   }
 }

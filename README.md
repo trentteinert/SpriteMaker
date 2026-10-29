@@ -1,8 +1,14 @@
 # SpriteMaker
 
 A pixel-art editor in the spirit of Aseprite, with extra tools for **rotating** sprites and **generating animation**.
-It is plain HTML/CSS/JavaScript: no build step and no dependencies. Open `index.html` in a browser
-(or run `npm start` and visit http://localhost:8000).
+It is a desktop app built with Electron, and the editor itself is plain HTML/CSS/JavaScript with no build step.
+
+```
+npm install
+npm start          # launch the desktop app
+npm run dist       # build an installer for your OS into dist/ (AppImage/deb, NSIS/portable, dmg)
+npm run web        # or serve it in a browser at http://localhost:8000
+```
 
 ## The basics
 Pencil, eraser, line, rectangle, ellipse, fill, eyedropper, rectangular selection (drag to move; copy/cut/paste;
