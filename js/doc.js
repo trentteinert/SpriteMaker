@@ -82,6 +82,15 @@
       return j;
     }
 
+    // Moves layer `from` so it ends up at array position `to` (0 = bottom).
+    reorderLayer(from, to) {
+      if (from === to || from < 0 || to < 0 || from >= this.layers.length || to >= this.layers.length) return from;
+      const [L] = this.layers.splice(from, 1);
+      this.layers.splice(to, 0, L);
+      for (const fr of this.frames) { const [c] = fr.cels.splice(from, 1); fr.cels.splice(to, 0, c); }
+      return to;
+    }
+
     // Inserts a frame at index `at`. copyFrom = index of a frame to duplicate, or null for a blank one.
     addFrame(at, copyFrom, duration) {
       const src = copyFrom === null || copyFrom === undefined ? null : this.frames[copyFrom];

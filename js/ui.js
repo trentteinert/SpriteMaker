@@ -242,10 +242,11 @@
       o.querySelector('input').onpointerdown = () => ed.commit();
       g = grp();
       g.style.borderRight = '0';
-      const b1 = btn(g, '⟳ Rotation frames', 'Generate a turntable of rotated frames', () => dlgTurntable());
-      const b2 = btn(g, '≣ Stack rotate', 'Spin an object built from layers', () => dlgStack());
+      const b0 = btn(g, '⟲ Side turn', 'Spin a side/front-view sprite in 3D', () => dlgTurn());
+      const b1 = btn(g, '⟳ Top-down', 'In-plane rotation frames (top-down sprites)', () => dlgTurntable());
+      const b2 = btn(g, '≣ Stack', 'Top-down stacked slices rotating', () => dlgStack());
       const b3 = btn(g, '⤳ Tween', 'Tween the selection/layer over several frames', () => dlgTween());
-      [b1, b2, b3].forEach((b) => { b.style.borderColor = 'var(--accent2)'; });
+      [b0, b1, b2, b3].forEach((b) => { b.style.borderColor = 'var(--accent2)'; });
     }
     $('#b-play').textContent = ed.playing ? '⏸' : '▶';
     $('#b-play').classList.toggle('on', ed.playing);
@@ -275,6 +276,19 @@
     ed.clampPos(); ed.emit('structure'); ed.touch();
   }
 
+  let dragLayer = -1;
+  function clearDropMarks() { document.querySelectorAll('.drop-above,.drop-below').forEach((e) => e.classList.remove('drop-above', 'drop-below')); }
+  // `pos` is the insertion slot among the current layers (0 = below the bottom layer, n = above the top one).
+  function moveLayerTo(from, pos) {
+    const d = ed.doc, to = from < pos ? pos - 1 : pos;
+    if (to === from) return;
+    const active = d.layers[ed.layer];
+    ed.commit();
+    d.reorderLayer(from, to);
+    ed.layer = d.layers.indexOf(active);
+    ed.emit('structure'); ed.touch();
+  }
+
   function renderTimeline() {
     const g = $('#tl-grid'), d = ed.doc, nf = d.frames.length, nl = d.layers.length;
     g.innerHTML = '';
@@ -297,6 +311,23 @@
       const nm = el('span', 'nm', esc(L.name)); nm.title = 'Double-click to rename';
       n.append(eye, nm);
       n.onclick = () => ed.setLayer(l);
+      n.draggable = true;
+      n.ondragstart = (e) => { e.dataTransfer.setData('text/plain', String(l)); e.dataTransfer.effectAllowed = 'move'; dragLayer = l; n.style.opacity = '.5'; };
+      n.ondragend = () => { dragLayer = -1; clearDropMarks(); n.style.opacity = ''; };
+      n.ondragover = (e) => {
+        if (dragLayer < 0) return;
+        e.preventDefault();
+        const above = e.offsetY < n.clientHeight / 2;
+        clearDropMarks(); n.classList.add(above ? 'drop-above' : 'drop-below');
+      };
+      n.ondragleave = () => n.classList.remove('drop-above', 'drop-below');
+      n.ondrop = (e) => {
+        e.preventDefault();
+        const above = e.offsetY < n.clientHeight / 2, from = dragLayer;
+        dragLayer = -1; clearDropMarks();
+        if (from < 0) return;
+        moveLayerTo(from, above ? l + 1 : l); // rows are drawn top layer first
+      };
       n.ondblclick = async () => {
         const r = await form('Layer', [{ key: 'name', label: 'Name', type: 'text', value: L.name }]);
         if (r) { ed.commit(); L.name = r.name || L.name; ed.emit('structure'); }
@@ -464,8 +495,8 @@
   }
 
   async function dlgTurntable() {
-    const r = await form('Rotation frames', [
-      { type: 'info', text: 'Creates a set of frames showing the current frame rotated step by step — the current frame is the 0° pose. All layers are rotated. Use 360° for a seamless spin.' },
+    const r = await form('Top-down rotation frames', [
+      { type: 'info', text: 'Rotates the picture <b>in the screen plane</b>, like a top-down ship or car turning. Not suitable for side-view characters (use Side-view turn for those). The current frame is the 0° pose and all layers are rotated; 360° gives a seamless spin.' },
       { key: 'count', label: 'Number of frames', type: 'select', value: 8, options: [4, 6, 8, 12, 16, 24, 32, 36].map((n) => [n, String(n)]) },
       { key: 'total', label: 'Total angle (°)', type: 'number', value: 360, min: 1, max: 360 },
       { key: 'direction', label: 'Direction', type: 'select', value: 'cw', options: [['cw', 'Clockwise'], ['ccw', 'Counter-clockwise']] },
@@ -482,7 +513,7 @@
 
   async function dlgStack() {
     const vis = ed.doc.layers.filter((l) => l.visible).length;
-    const r = await form('Stack rotation (layers as depth)', [
+    const r = await form('Top-down stack rotation', [
       { type: 'info', text: `Draw your object as <b>top-down slices</b>: each visible layer (${vis} now) is a horizontal cross-section at one height, bottom layer = ground. This spins the stack around its vertical axis into a new “Stack” layer, one frame per angle. Add room above the object first (Sprite ▸ Canvas size).` },
       { key: 'count', label: 'Number of frames', type: 'select', value: 16, options: [8, 12, 16, 24, 32, 36].map((n) => [n, String(n)]) },
       { key: 'total', label: 'Total angle (°)', type: 'number', value: 360, min: 1, max: 360 },
@@ -497,6 +528,29 @@
     r.count = +r.count; r.tagName = 'stack';
     const res = SM.gen.stackRotate(ed.ctx(), r);
     if (!res) { msg('No visible layers to stack'); return; }
+    ed.adopt(res);
+  }
+
+  async function dlgTurn() {
+    const vis = ed.doc.layers.filter((l) => l.visible).length;
+    const r = await form('Side-view turn (3D)', [
+      { type: 'info', text: `Spins a <b>side-view or front-view</b> sprite around its vertical axis. It gives the sprite depth, then renders it at each angle into a new “Turn” layer. With one layer it is inflated into a rounded shape; with several visible layers (${vis} now) each one is a depth slice: <b>bottom layer = farthest, top layer = nearest</b>, e.g. far arm / body / near arm. The pivot's X position is the turning axis.` },
+      { key: 'count', label: 'Number of frames', type: 'select', value: 8, options: [4, 6, 8, 12, 16, 24, 32, 36].map((n) => [n, String(n)]) },
+      { key: 'total', label: 'Total angle (°)', type: 'number', value: 360, min: 1, max: 360 },
+      { key: 'direction', label: 'Front turns toward', type: 'select', value: 'right', options: [['right', 'Viewer’s right'], ['left', 'Viewer’s left']] },
+      { key: 'shape', label: 'Depth shape', type: 'select', value: 'rounded', options: [['rounded', 'Rounded (inflated)'], ['flat', 'Flat slab (cut-out)']] },
+      { key: 'thickness', label: 'Thickness (px)', type: 'number', value: Math.max(2, Math.round(ed.doc.w / 4)), min: 1, max: 128 },
+      { key: 'spacing', label: 'Layer depth gap (px)', type: 'number', value: 2, min: 0, max: 64, step: 0.5 },
+      { key: 'pivot', label: 'Turn around', type: 'select', value: 'doc', options: [['doc', 'Pivot point X'], ['center', 'Canvas center']] },
+      { key: 'shade', label: 'Darken side faces', type: 'check', value: false },
+      { key: 'hideSlices', label: 'Hide source layers', type: 'check', value: true },
+      { key: 'tag', label: 'Add a tag', type: 'check', value: true },
+    ], 'Generate');
+    if (!r) return;
+    ed.stop();
+    r.count = +r.count; r.tagName = 'turn';
+    const res = SM.gen.turn(ed.ctx(), r);
+    if (!res) { msg('No visible layers to turn'); return; }
     ed.adopt(res);
   }
 
@@ -557,7 +611,7 @@
       ['New tag…', () => tagDialog()], ['Play / pause', () => ed.toggle(), 'Enter'],
     ]],
     ['Generate', [
-      ['Rotation frames (turntable)…', dlgTurntable], ['Stack rotation (layers as depth)…', dlgStack], ['Motion tween (limb / bob)…', dlgTween],
+      ['Side-view turn (3D, for side/front sprites)…', dlgTurn], ['Top-down rotation frames (in-plane)…', dlgTurntable], ['Top-down stack rotation (layers as height)…', dlgStack], '-', ['Motion tween (limb / bob)…', dlgTween],
     ]],
     ['View', [
       ['Zoom in', () => ed.zoomBy(1), '+'], ['Zoom out', () => ed.zoomBy(-1), '−'], ['Fit to window', () => ed.fit(), '0'], '-',

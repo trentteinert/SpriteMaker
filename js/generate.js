@@ -72,6 +72,27 @@
     return { frame: src, layer: out, sel: null };
   };
 
+  // Side-view turn: visible layers (bottom = farthest, top = nearest) become depth
+  // slices of a voxel model that is rendered spinning around the vertical axis
+  // through the pivot, into a new "Turn" layer with one frame per angle.
+  gen.turn = function (ctx, o) {
+    const d = ctx.doc, src = ctx.frame;
+    const count = Math.max(2, o.count | 0);
+    const sliceIdx = d.layers.map((l, i) => (l.visible ? i : -1)).filter((i) => i >= 0);
+    if (!sliceIdx.length) return null;
+    const model = SM.buildVoxels(sliceIdx.map((l) => d.cel(src, l)), d.w, d.h,
+      { thickness: o.thickness, spacing: o.spacing, mode: o.shape });
+    const cx = o.pivot === 'center' ? d.w / 2 : d.pivot.x + 0.5;
+    ctx.hist.commit();
+    const out = d.addLayer('Turn', d.layers.length);
+    const step = (o.total >= 360 ? o.total / count : o.total / (count - 1)) * (o.direction === 'left' ? -1 : 1);
+    for (let k = 1; k < count; k++) d.addFrame(src + k, null, d.frames[src].duration);
+    for (let k = 0; k < count; k++) d.setCel(src + k, out, SM.renderTurn(model, (o.start || 0) + k * step, cx, o.shade ? 0.8 : 1));
+    if (o.hideSlices) for (const l of sliceIdx) d.layers[l].visible = false;
+    if (o.tag) d.tags.push({ name: o.tagName || 'turn', from: src, to: src + count - 1 });
+    return { frame: src, layer: out, sel: null };
+  };
+
   // Motion tween of the selection (or the whole active cel): interpolates a
   // rotation + offset across `count` frames. Source frame is t = 0.
   // mode: 'oneway' ends exactly on the target; 'loop' goes there and back so it loops seamlessly.

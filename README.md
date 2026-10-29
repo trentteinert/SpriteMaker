@@ -13,7 +13,7 @@ npm run web        # or serve it in a browser at http://localhost:8000
 ## The basics
 Pencil, eraser, line, rectangle, ellipse, fill, eyedropper, rectangular selection (drag to move; copy/cut/paste;
 arrow-key nudge), brush size/shape, mirror drawing (X/Y), palettes (DB32, PICO-8, Game Boy…), layers with
-visibility/opacity, frames with per-frame timing, tags, onion skinning, live preview, unlimited undo,
+visibility/opacity (drag layers in the timeline to reorder them), frames with per-frame timing, tags, onion skinning, live preview, unlimited undo,
 zoom/pan with grid. Left button draws with the foreground colour, right button with the background colour.
 Your work is autosaved in the browser; **File ▸ Save project** writes a `.spritemaker.json` file.
 
@@ -21,8 +21,11 @@ Your work is autosaved in the browser; **File ▸ Save project** writes a `.spri
 * **Pivot (P)**: click to set the rotation centre (magenta marker). Saved with the project and exported in the sheet JSON.
 * **Sprite ▸ Rotate…**: rotate the selection, a cel, a frame, or every frame by any angle. The *RotSprite*
   method upscales with Scale2x, rotates, and reduces again so edges stay crisp. *Nearest* is the fast option.
-* **Generate ▸ Rotation frames**: turns the current frame into a 4–36 frame spin (turntable), optionally tagged.
-* **Generate ▸ Stack rotation**: draw an object as top-down slices on separate layers and render it spinning
+* **Generate ▸ Side-view turn (3D)**: for side/front-view characters and objects. It gives the sprite depth and renders it
+  spinning around its vertical axis (pivot X). One layer is inflated into a rounded shape; several layers act as depth slices
+  (bottom = farthest, top = nearest), e.g. far arm / body / near arm. Choose rounded or flat thickness.
+* **Generate ▸ Top-down rotation frames**: in-plane rotation into a 4–36 frame spin, for top-down sprites (ships, cars, turrets).
+* **Generate ▸ Top-down stack rotation**: draw an object as top-down slices on separate layers and render it spinning
   in pseudo-3D (stacked-sprite technique) with adjustable slice spacing and camera tilt.
 * Rotate 90°, flip H/V, canvas resize with anchor, crop to content.
 

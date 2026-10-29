@@ -131,3 +131,7 @@ main { display: grid; grid-template-columns: 46px 1fr 236px; min-height: 0; }
 .dlg .anchor { display: grid; grid-template-columns: repeat(3, 22px); gap: 3px; }
 .dlg .anchor button { height: 22px; padding: 0; }
 @media (max-width: 800px) { main { grid-template-columns: 46px 1fr; } #side { display: none; } }
+
+.tl-lname[draggable=true] { cursor: grab; }
+.tl-lname.drop-above { box-shadow: inset 0 3px 0 var(--accent2); }
+.tl-lname.drop-below { box-shadow: inset 0 -3px 0 var(--accent2); }

@@ -8,7 +8,7 @@
       this.refs = refs; // { viewport, stage, onion, comp, pre, ui }
       this.listeners = {};
       this.tool = 'pencil';
-      this.size = 1; this.shape = 'square'; this.fill = false;
+      this.size = 1; this.shape = 'round'; this.fill = false;
       this.symX = false; this.symY = false; this.grid = true;
       this.onion = { on: false, prev: 1, next: 1 };
       this.fg = [0, 0, 0, 255]; this.bg = [255, 255, 255, 255];
@@ -109,7 +109,7 @@
       const s = this.size, lo = -Math.floor((s - 1) / 2), pts = [];
       for (let j = 0; j < s; j++) {
         for (let i = 0; i < s; i++) {
-          if (this.shape === 'round' && s > 2 && Math.hypot(i - (s - 1) / 2, j - (s - 1) / 2) > s / 2 - 0.25) continue;
+          if (this.shape === 'round' && s > 2 && Math.hypot(i - (s - 1) / 2, j - (s - 1) / 2) > (s <= 4 ? s / 2 - 0.25 : s / 2)) continue;
           pts.push([lo + i, lo + j]);
         }
       }

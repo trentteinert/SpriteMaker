@@ -184,4 +184,113 @@
     });
     return out;
   };
+
+  // ---- Side-view turn: give a sprite depth and spin it around its vertical axis ----
+
+  // Distance from each opaque pixel centre to the nearest transparent pixel
+  // (or the canvas edge), via a two-pass chamfer transform.
+  function edgeDistance(buf, w, h) {
+    const INF = 1e9, d = new Float32Array(w * h), D = 1.4142;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        d[i] = buf[i * 4 + 3] ? Math.min(x + 1, w - x, y + 1, h - y) : 0;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!d[i]) continue;
+        let v = d[i];
+        if (x > 0) v = Math.min(v, d[i - 1] + 1);
+        if (y > 0) {
+          v = Math.min(v, d[i - w] + 1);
+          if (x > 0) v = Math.min(v, d[i - w - 1] + D);
+          if (x < w - 1) v = Math.min(v, d[i - w + 1] + D);
+        }
+        d[i] = v;
+      }
+    }
+    for (let y = h - 1; y >= 0; y--) {
+      for (let x = w - 1; x >= 0; x--) {
+        const i = y * w + x;
+        if (!d[i]) continue;
+        let v = d[i];
+        if (x < w - 1) v = Math.min(v, d[i + 1] + 1);
+        if (y < h - 1) {
+          v = Math.min(v, d[i + w] + 1);
+          if (x < w - 1) v = Math.min(v, d[i + w + 1] + D);
+          if (x > 0) v = Math.min(v, d[i + w - 1] + D);
+        }
+        d[i] = v;
+      }
+    }
+    return d;
+  }
+
+  // Builds a voxel model from layer images, ordered back (index 0) to front.
+  // Each layer sits `spacing` voxels behind the next one. opt.mode 'rounded'
+  // inflates every pixel into a lens up to `thickness` deep (thin at the
+  // silhouette edge); 'flat' extrudes it as a constant-thickness slab.
+  // Returns { vox: Uint32Array (x + w*(y + h*z)), w, h, D }.
+  SM.buildVoxels = function (slices, w, h, opt) {
+    const n = slices.length, thick = Math.max(1, opt.thickness), spacing = opt.spacing || 0;
+    const D = Math.ceil(spacing * (n - 1) + thick) + 2;
+    const vox = new Uint32Array(w * h * D);
+    const R = thick / 2;
+    slices.forEach((s, li) => {
+      const z0 = (li - (n - 1) / 2) * spacing, u = SM.u32(s);
+      const dist = opt.mode === 'flat' ? null : edgeDistance(s, w, h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const c = u[y * w + x];
+          if (!(c >>> 24)) continue;
+          let half = R;
+          if (dist) {
+            const t = Math.min(dist[y * w + x] - 0.5, R) / R;
+            half = R * Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t)));
+          }
+          half = Math.max(half, 0.5);
+          let a = Math.ceil(z0 - half + D / 2 - 0.5), b = Math.floor(z0 + half + D / 2 - 0.5);
+          if (b < a) a = b = Math.floor(z0 + D / 2);
+          for (let z = Math.max(0, a); z <= Math.min(D - 1, b); z++) vox[x + w * (y + h * z)] = c;
+        }
+      }
+    });
+    return { vox, w, h, D };
+  };
+
+  // Renders the model after turning it by `angle` degrees about the vertical
+  // axis through x = cx (continuous pixel coordinates). At 0 degrees the camera
+  // sees the original front view; the front turns toward the viewer's right for
+  // positive angles. shade < 1 darkens faces that face sideways.
+  SM.renderTurn = function (model, angle, cx, shade) {
+    const { vox, w, h, D } = model;
+    const rad = (angle * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
+    const out = new Uint32Array(w * h), outB = new Uint8ClampedArray(out.buffer);
+    const reach = Math.hypot(Math.max(cx, w - cx), D / 2) + 1;
+    const step = 0.5, k = shade === undefined ? 1 : shade;
+    for (let py = 0; py < h; py++) {
+      for (let px = 0; px < w; px++) {
+        const u = px + 0.5 - cx;
+        let pix = -1, piz = -1;
+        for (let wv = reach; wv >= -reach; wv -= step) {
+          const X = u * c - wv * s, Z = u * s + wv * c;
+          const ix = Math.floor(cx + X), iz = Math.floor(Z + D / 2);
+          if (ix < 0 || ix >= w || iz < 0 || iz >= D) { pix = ix; piz = iz; continue; }
+          const col = vox[ix + w * (py + h * iz)];
+          if (col) {
+            out[py * w + px] = col;
+            if (k < 1 && pix !== ix && piz === iz) {
+              const o = (py * w + px) * 4;
+              outB[o] *= k; outB[o + 1] *= k; outB[o + 2] *= k;
+            }
+            break;
+          }
+          pix = ix; piz = iz;
+        }
+      }
+    }
+    return outB;
+  };
 })(globalThis);

@@ -66,6 +66,14 @@ test('doc layers/frames and tags stay consistent', () => {
   d.addLayer('x'); eq(d.frames.every((f) => f.cels.length === 2), true);
   d.moveLayer(1, -1); eq(d.layers[0].name, 'x');
 });
+test('reorderLayer moves layers and their cels together', () => {
+  const d = new SM.Doc(2, 2); d.addLayer('b'); d.addLayer('c'); d.addFrame(1, null);
+  d.celW(0, 0)[0] = 1; d.celW(0, 1)[0] = 2; d.celW(0, 2)[0] = 3; d.celW(1, 0)[0] = 4;
+  eq(d.reorderLayer(0, 2), 2);
+  eq(d.layers.map((l) => l.name), ['b', 'c', 'Layer 1']);
+  eq([d.cel(0, 0)[0], d.cel(0, 1)[0], d.cel(0, 2)[0], d.cel(1, 2)[0]], [2, 3, 1, 4]);
+  eq(d.reorderLayer(2, 1), 1); eq(d.layers.map((l) => l.name), ['b', 'Layer 1', 'c']);
+});
 test('history undo/redo is copy-on-write safe', () => {
   const d = new SM.Doc(4, 4), h = new SM.History(d);
   h.commit(); d.celW(0, 0)[3] = 255;
@@ -117,6 +125,39 @@ test('tween one-way ends on target', () => {
   d.celW(0, 0).set(R, (8 * 16 + 8) * 4);
   SM.gen.tween({ doc: d, hist: h, frame: 0, layer: 0, sel: null }, { count: 5, dx: 4, dy: 2, angle: 0, ease: 'linear', mode: 'oneway', pivot: 'center' });
   eq(px(d.cel(4, 0), 16, 12, 10), R);
+});
+test('side-view turn: 0 deg matches the flattened sprite, 180 mirrors it, 90 is a thin slab', () => {
+  const pts = []; for (let y = 2; y < 10; y++) for (let x = 3; x < 9; x++) pts.push([x, y]);
+  const a = make(12, 12, pts);
+  for (const mode of ['flat', 'rounded']) {
+    const m = SM.buildVoxels([a], 12, 12, { thickness: 4, spacing: 0, mode });
+    const r0 = SM.renderTurn(m, 0, 6, 1);
+    eq(Array.from(r0), Array.from(a), mode + ' 0deg');
+    const r180 = SM.renderTurn(m, 180, 6, 1);
+    eq(Array.from(r180), Array.from(SM.flipH(a, 12, 12)), mode + ' 180deg');
+    const r90 = SM.renderTurn(m, 90, 6, 1);
+    const b = SM.bounds(r90, 12, 12);
+    if (!b || b.w > 5 || b.w < 1 || b.h !== 8) throw new Error(mode + ' 90deg bounds ' + JSON.stringify(b));
+  }
+});
+test('side-view turn: layer depth order decides who is in front', () => {
+  const back = make(8, 8, [[3, 3, [0, 0, 255, 255]]]), front = make(8, 8, [[3, 3]]);
+  const m = SM.buildVoxels([back, front], 8, 8, { thickness: 1, spacing: 2, mode: 'flat' });
+  eq(px(SM.renderTurn(m, 0, 4, 1), 8, 3, 3), [255, 0, 0, 255]);
+  eq(px(SM.renderTurn(m, 180, 4, 1), 8, 4, 3), [0, 0, 255, 255]);
+});
+test('rounded turn is thinner at the edges than the middle', () => {
+  const pts = []; for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) pts.push([x, y]);
+  const m = SM.buildVoxels([make(12, 12, pts)], 12, 12, { thickness: 8, spacing: 0, mode: 'rounded' });
+  const depth = (x, y) => { let n = 0; for (let z = 0; z < m.D; z++) if (m.vox[x + 12 * (y + 12 * z)]) n++; return n; };
+  if (!(depth(6, 6) > depth(0, 6))) throw new Error('middle ' + depth(6, 6) + ' edge ' + depth(0, 6));
+});
+test('turn generator adds a Turn layer, frames and hides sources', () => {
+  const d = new SM.Doc(12, 12), h = new SM.History(d);
+  for (let y = 2; y < 10; y++) for (let x = 4; x < 8; x++) d.celW(0, 0).set(R, (y * 12 + x) * 4);
+  const r = SM.gen.turn({ doc: d, hist: h, frame: 0, layer: 0, sel: null }, { count: 8, total: 360, direction: 'right', thickness: 4, spacing: 0, shape: 'rounded', pivot: 'doc', hideSlices: true, tag: true, shade: true });
+  eq(d.frames.length, 8); eq(d.layers[1].name, 'Turn'); eq(d.layers[0].visible, false); eq(r.layer, 1);
+  eq(Array.from(d.cel(0, 1)), Array.from(d.cel(0, 0)));
 });
 test('gif encoder emits a valid-looking file', () => {
   const f = [make(4, 4, [[1, 1]]), make(4, 4, [[2, 2]])];
