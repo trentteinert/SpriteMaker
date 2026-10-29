@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpriteMaker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="menubar"><span class="brand">SpriteMaker</span><nav id="menus"></nav><span id="docinfo"></span></header>
+
+  <div id="optbar">
+    <label>Size <input id="o-size" type="number" min="1" max="32" value="1"></label>
+    <label>Brush <select id="o-shape"><option value="square">Square</option><option value="round">Round</option></select></label>
+    <label class="chk"><input id="o-fill" type="checkbox"> Filled shapes</label>
+    <span class="sep"></span>
+    <label class="chk" title="Mirror horizontally"><input id="o-symx" type="checkbox"> Mirror X</label>
+    <label class="chk" title="Mirror vertically"><input id="o-symy" type="checkbox"> Mirror Y</label>
+    <span class="sep"></span>
+    <label class="chk"><input id="o-grid" type="checkbox" checked> Grid</label>
+    <label class="chk"><input id="o-onion" type="checkbox"> Onion skin</label>
+    <label>± <input id="o-onion-n" type="number" min="1" max="4" value="1" title="Onion skin frames each side"></label>
+    <span class="sep"></span>
+    <button id="b-zoomout" title="Zoom out (-)">−</button><span id="zoomlabel">800%</span><button id="b-zoomin" title="Zoom in (+)">+</button><button id="b-fit" title="Fit to window">Fit</button>
+  </div>
+
+  <main>
+    <aside id="toolbar"></aside>
+    <section id="viewport">
+      <div id="stage">
+        <canvas id="c-onion"></canvas>
+        <canvas id="c-comp"></canvas>
+        <canvas id="c-pre"></canvas>
+      </div>
+      <canvas id="c-ui"></canvas>
+    </section>
+    <aside id="side">
+      <section class="panel">
+        <h3>Color</h3>
+        <div class="colors">
+          <div class="swatches">
+            <label class="sw bg" title="Background color (right click)"><input type="color" id="p-bg" value="#ffffff"></label>
+            <label class="sw fg" title="Foreground color (left click)"><input type="color" id="p-fg" value="#000000"></label>
+          </div>
+          <div class="colorctl">
+            <input id="p-hex" type="text" value="#000000" maxlength="7" spellcheck="false">
+            <button id="p-swap" title="Swap colors (X)">⇄</button>
+          </div>
+        </div>
+        <div id="palette"></div>
+        <div class="row">
+          <button id="pal-add" title="Add the foreground color to the palette">+ Add</button>
+          <select id="pal-preset"><option value="">Palette…</option><option value="DB32">DB32</option><option value="PICO8">PICO-8</option><option value="GAMEBOY">Game Boy</option><option value="GRAYS">Grays</option><option value="used">From sprite</option></select>
+        </div>
+      </section>
+      <section class="panel">
+        <h3>Preview <select id="pv-zoom"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option><option value="4">4x</option></select></h3>
+        <div id="preview"><canvas id="c-preview"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Tags <button id="tag-add" title="Add a tag from the current frame">+</button></h3>
+        <div id="tags"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer id="timeline">
+    <div class="tl-bar" id="tl-bar"></div>
+    <div class="tl-scroll"><div id="tl-grid"></div></div>
+  </footer>
+
+  <div id="statusbar"><span id="st-pos"></span><span id="st-msg"></span></div>
+  <div id="modal" hidden></div>
+  <input id="file-open" type="file" hidden>
+
+  <script src="js/util.js"></script>
+  <script src="js/transform.js"></script>
+  <script src="js/doc.js"></script>
+  <script src="js/generate.js"></script>
+  <script src="js/gif.js"></script>
+  <script src="js/tools.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
