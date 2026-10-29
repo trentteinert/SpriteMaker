@@ -10,15 +10,24 @@ npm run dist       # build an installer for your OS into dist/ (AppImage/deb, NS
 npm run web        # or serve it in a browser at http://localhost:8000
 ```
 
-## The workflow: one sprite → a complete game sprite sheet
-1. Draw your idle character or object on a canvas with some empty room around it.
+## The workflow: one sprite → a complete Godot sprite sheet
+1. Draw your idle character or object (leave empty canvas around it for jumps and falls).
 2. Split it into parts: select the head (M) → **J** (lift to new layer) → name it; repeat for arms, legs, weapon.
-3. **Generate ▸ Full sprite set** (▦ Full set): tick the animations you want (idle, walk, run, jump, attack, hurt, death),
-   set frame counts, Generate. Each animation gets its own tag. Use **Animation starter** instead when you want to tune one
-   animation with a live preview and edit the joints.
-4. Play with Enter, paint over the generated poses to clean them up (onion skin is on).
-5. **File ▸ Export** → *PNG sprite sheet + JSON* with layout **One row per tag**: one row per animation, plus JSON with each
-   animation's row, frame rectangles, durations, loop flag and the sprite pivot (Aseprite-style `frameTags` are included too).
+3. **Generate ▸ Full sprite set** (▦ Full set). Choose the game view:
+   * **Side view (platformer)**: right and left.
+   * **Top-down, 4 or 8 directions**: down, up, left, right (+ diagonals).
+   Pick each direction's source: **a frame you drew**, **Mirror** of another direction (exact flip), or **Auto** (a rough
+   3D turn of another view). Tick the animations (idle, walk, run, jump, attack, hurt, death) and frame counts.
+   Front/back views walk by stepping and bobbing; side views swing their limbs.
+4. For the best top-down result, draw each view: tick *Only make the rough view poses*, paint over the new `_pose_<dir>`
+   frames, then run Full set again. Frames tagged `_pose_<direction>` are used automatically as that direction's source.
+5. **File ▸ Export ▸ Godot 4 package** gives one zip: `name.png` (sheet), `name.tres` (SpriteFrames), `name.tscn`
+   (ready AnimatedSprite2D scene with the pivot as origin, nearest filtering) and `name.json`.
+
+The sheet has one row per animation *and direction*, grouped by animation: `idle_down, idle_up, idle_left, idle_right,
+walk_down, …`. Those are the animation names in Godot (`$AnimatedSprite2D.play("walk_left")`). idle/walk/run loop; the rest don't.
+Unzip into your project at the folder you typed as *Godot folder* (default `res://sprites/`) and Godot picks it up.
+Tags that start with `_` (working poses) are not exported.
 
 ## The basics
 Pencil, eraser, line, rectangle, ellipse, fill, eyedropper, rectangular selection (drag to move; copy/cut/paste;
@@ -63,7 +72,7 @@ starting points (walk 6, run 6, jump 8, attack 6, hurt 4, death 8) and are adjus
   (loop / ping-pong / once), tag-only preview.
 
 ## Export
-PNG (current frame), sprite sheet PNG plus Aseprite-style JSON (frames, durations, tags, pivot), animated GIF with
+Godot 4 package (above), PNG (current frame), sprite sheet PNG plus Aseprite-style JSON (frames, durations, tags, pivot), animated GIF with
 transparency. All with 1–8x scaling and optional tag selection. **File ▸ Import** reads PNG sprite sheets.
 
 Shortcuts are listed under **Help ▸ Keyboard shortcuts**.

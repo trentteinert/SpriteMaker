@@ -440,7 +440,8 @@
   async function exportDlg() {
     const d = ed.doc;
     const r = await form('Export', [
-      { key: 'fmt', label: 'Format', type: 'select', value: 'sheet', options: [['png', 'PNG — current frame'], ['sheet', 'PNG sprite sheet + JSON'], ['gif', 'Animated GIF']] },
+      { key: 'fmt', label: 'Format', type: 'select', value: d.tags.length ? 'godot' : 'sheet', options: [['godot', 'Godot 4 package (.zip: sheet + SpriteFrames + scene)'], ['sheet', 'PNG sprite sheet + JSON'], ['png', 'PNG — current frame'], ['gif', 'Animated GIF']] },
+      { key: 'resDir', label: 'Godot folder (res://)', type: 'text', value: 'res://sprites/' },
       { key: 'scale', label: 'Scale', type: 'select', value: '1', options: [1, 2, 3, 4, 6, 8].map((n) => [n, n + 'x']) },
       { key: 'tag', label: 'Frames', type: 'select', value: -1, options: [[-1, 'All frames'], ...d.tags.map((t, i) => [i, `Tag: ${t.name} (${t.from + 1}–${t.to + 1})`])] },
       { type: 'info', text: 'Sprite sheet options:' },
@@ -451,7 +452,10 @@
     ], 'Export');
     if (!r) return;
     const o = { scale: +r.scale, tag: +r.tag, layout: r.layout, cols: r.cols, pad: r.pad, name: r.name || 'sprite' };
-    if (r.fmt === 'png') SM.io.download(await SM.io.png(d, ed.frame, o.scale), o.name + '.png');
+    if (r.fmt === 'godot') {
+      try { SM.io.download(await SM.io.godotPackage(d, { scale: o.scale, pad: o.pad, name: o.name, resDir: r.resDir || 'res://' }), o.name + '_godot.zip'); }
+      catch (e) { msg(e.message); return; }
+    } else if (r.fmt === 'png') SM.io.download(await SM.io.png(d, ed.frame, o.scale), o.name + '.png');
     else if (r.fmt === 'gif') SM.io.download(SM.io.gif(d, o), o.name + '.gif');
     else {
       const s = await SM.io.sheet(d, o);
@@ -663,28 +667,151 @@
   }
 
   // ---------------------------------------------------------------- full sprite set
-  const SET_DEFAULTS = [['idle', 4, 220], ['walk', 6, 110], ['run', 6, 80], ['jump', 8, 90], ['attack', 6, 75], ['hurt', 4, 90], ['death', 8, 110]];
+  const SET_ANIMS = [['idle', 4, 220], ['walk', 6, 110], ['run', 6, 80], ['jump', 8, 90], ['attack', 6, 75], ['hurt', 4, 90], ['death', 8, 110]];
+  const DIR_LABEL = { down: 'Down (front)', up: 'Up (back)', left: 'Left', right: 'Right', down_right: 'Down-right', down_left: 'Down-left', up_right: 'Up-right', up_left: 'Up-left' };
+  const MODES = {
+    side: { name: 'Side view (platformer)', dirs: ['right', 'left'] },
+    top4: { name: 'Top-down — 4 directions', dirs: ['down', 'up', 'left', 'right'] },
+    top8: { name: 'Top-down — 8 directions', dirs: ['down', 'down_right', 'right', 'up_right', 'up', 'up_left', 'left', 'down_left'] },
+  };
+
   async function dlgFullSet() {
-    const d = ed.doc, src = ed.frame, PRE = SM.anim.PRESETS;
-    if (!d.frames[src].cels.some((c) => SM.bounds(c, d.w, d.h))) { msg('Draw your idle sprite on this frame first'); return; }
-    const rig = SM.anim.rigFor(d, src), limbs = rig.roles.some((r) => /^(arm|leg)/.test(r));
-    const fields = [
-      { type: 'info', text: `Generates a whole game set from this frame (your idle pose) in one go: each animation gets its own tag. ${limbs ? '' : '<b>Heads up:</b> only one body part is set up, so limbs will not move. Split off the head, arms and legs with Select + J first (see Animation starter). '}Then use File ▸ Export with “One row per tag”.` },
-      ...SET_DEFAULTS.flatMap(([id, n]) => [{ key: 'on_' + id, label: PRE[id].name, type: 'check', value: true }, { key: 'n_' + id, label: '   frames', type: 'number', value: n, min: 2, max: 24 }]),
-      { key: 'dir', label: 'Character faces', type: 'select', value: 1, options: [[1, 'Right'], [-1, 'Left']] },
-      { key: 'strength', label: 'Strength (%)', type: 'number', value: 100, min: 10, max: 250, step: 10 },
-      { key: 'method', label: 'Rotation method', type: 'select', value: 'rotsprite', options: METHODS },
-      { key: 'flash', label: 'White flash on hit', type: 'check', value: true },
-      { type: 'info', text: 'Leave empty canvas around the sprite — jumps and falls are clipped at the canvas edge (Sprite ▸ Canvas size).' },
-    ];
-    const r = await form('Build full sprite set', fields, 'Generate all');
-    if (!r) return;
-    const list = SET_DEFAULTS.filter(([id]) => r['on_' + id]).map(([id, , ms]) => ({ id, count: Math.round(r['n_' + id]), ms }));
-    if (!list.length) return;
+    const d = ed.doc, PRE = SM.anim.PRESETS;
+    // The idle pose is the current frame, unless that is a generated one: then the first untagged frame.
+    const tagged = (i) => d.tags.some((t) => i >= t.from && i <= t.to);
+    let cur = ed.frame;
+    if (tagged(cur)) { const u = d.frames.findIndex((_, i) => !tagged(i)); if (u >= 0) cur = u; }
+    if (!d.frames[cur].cels.some((c) => SM.bounds(c, d.w, d.h))) { msg('Draw your idle sprite on this frame first'); return; }
     ed.stop();
-    ed.adopt(SM.gen.fullSet(ed.ctx(), list, { dir: +r.dir, strength: r.strength, method: r.method, flash: r.flash, rig }));
-    const total = list.reduce((a, e) => a + e.count, 0);
-    msg(`${list.length} animations / ${total} frames created — File ▸ Export ▸ “One row per tag” gives the game sheet`);
+    const st = { mode: 'side', faces: 'right', src: {}, on: {}, n: {} };
+    for (const [id, n] of SET_ANIMS) { st.on[id] = true; st.n[id] = n; }
+
+    // Sensible starting point for each mode: your drawn pose, mirrors where a flip is exact, rough 3D turns elsewhere.
+    function defaults() {
+      const f = 'f:' + cur, M = st.mode, out = {};
+      if (M === 'side') { const me = st.faces, other = me === 'right' ? 'left' : 'right'; out[me] = f; out[other] = 'm:' + me; }
+      else if (M === 'top4') Object.assign(out, { down: f, up: 'a:down', right: 'a:down', left: 'm:right' });
+      else Object.assign(out, { down: f, down_right: 'a:down', right: 'a:down', up_right: 'a:down', up: 'a:down', up_left: 'm:up_right', left: 'm:right', down_left: 'm:down_right' });
+      // A frame tagged _pose_<direction> (e.g. one you painted over a rough pose) is used for that direction.
+      for (const name of MODES[M].dirs) {
+        const t = d.tags.filter((x) => x.name === '_pose_' + name).pop();
+        if (t) out[name] = 'f:' + t.from;
+      }
+      return out;
+    }
+    st.src = defaults(); st.on.jump = true;
+
+    const modal = $('#modal');
+    modal.innerHTML = ''; modal.hidden = false;
+    const dlg = el('div', 'dlg wide');
+    dlg.appendChild(el('h2', '', 'Full sprite set — every animation, every direction'));
+    const root = el('div', 'starter'), f = el('div', 'fields'), side = el('div', 'pv');
+    root.append(f, side); dlg.appendChild(root);
+    const sel = (opts, val) => { const x = el('select'); for (const [v, t] of opts) { const o = el('option', '', esc(t)); o.value = v; x.appendChild(o); } x.value = val; return x; };
+    const num = (val, min, max, step) => { const x = el('input'); x.type = 'number'; x.value = val; x.min = min; x.max = max; if (step) x.step = step; return x; };
+    const add = (label, inp) => { f.appendChild(el('label', 'k', label)); f.appendChild(inp); return inp; };
+
+    f.appendChild(el('p', '', 'Builds all the animations below from your idle pose and lays them out <b>animation by animation, each with all of its directions</b> (e.g. <b>walk_down, walk_up, walk_left, walk_right</b>), each tagged for export.'));
+    const mode = add('Game view', sel(Object.entries(MODES).map(([k, v]) => [k, v.name]), st.mode));
+    const facesLab = el('label', 'k', 'Sprite currently faces'), faces = sel([['right', 'Right'], ['left', 'Left']], 'right');
+    f.append(facesLab, faces);
+
+    f.appendChild(el('h4', '', 'Directions — where each view comes from'));
+    const dirTable = el('table'); f.appendChild(dirTable);
+    f.appendChild(el('p', 'hint', '<b>Frame N</b> = a pose you drew. <b>Mirror</b> = flipped copy (exact). <b>Auto</b> = rough 3D turn of another view: only a starting point. Tick <i>Only make the rough view poses</i>, paint over the new _pose_ frames, then run this again (frames tagged _pose_&lt;direction&gt; are used automatically). The best result is to draw each view yourself.'));
+
+    f.appendChild(el('h4', '', 'Animations'));
+    const animTable = el('table'); f.appendChild(animTable);
+    const strength = add('Strength (%)', num(100, 10, 250, 10));
+    const method = add('Rotation method', sel(METHODS, 'rotsprite'));
+    const flash = el('input'); flash.type = 'checkbox'; flash.checked = true; flash.style.justifySelf = 'start';
+    f.append(el('label', 'k', 'White flash on hit'), flash);
+    const poseOnlyRow = el('input'); poseOnlyRow.type = 'checkbox'; poseOnlyRow.style.justifySelf = 'start';
+    const poseOnlyLab = el('label', 'k', 'Only make the rough view poses'); f.append(poseOnlyLab, poseOnlyRow);
+    const warn = el('p', 'warn', ''); f.appendChild(warn);
+
+    const summary = el('div', 'hint'); side.appendChild(el('div', 'hint', 'You will get'));
+    side.appendChild(summary);
+
+    function srcOptions(name, dirs) {
+      const o = [];
+      for (let i = 0; i < d.frames.length; i++) o.push(['f:' + i, `Frame ${i + 1}` + (i === cur ? ' (current)' : '')]);
+      for (const x of dirs) if (x !== name) o.push(['m:' + x, 'Mirror of ' + DIR_LABEL[x]]);
+      if (st.mode !== 'side') for (const x of dirs) if (x !== name) o.push(['a:' + x, 'Auto — 3D turn of ' + DIR_LABEL[x]]);
+      return o;
+    }
+    function renderTables() {
+      const dirs = MODES[st.mode].dirs;
+      dirTable.innerHTML = '';
+      for (const name of dirs) {
+        const tr = el('tr'), td1 = el('td', '', esc(DIR_LABEL[name])), td2 = el('td'), x = sel(srcOptions(name, dirs), st.src[name]);
+        x.onchange = () => { st.src[name] = x.value; update(); };
+        td2.appendChild(x); tr.append(td1, td2); dirTable.appendChild(tr);
+      }
+      animTable.innerHTML = '';
+      for (const [id] of SET_ANIMS) {
+        const tr = el('tr'), c = el('input'), n = num(st.n[id], 2, 24), t1 = el('td'), t3 = el('td');
+        c.type = 'checkbox'; c.checked = st.on[id]; c.onchange = () => { st.on[id] = c.checked; update(); };
+        n.oninput = () => { st.n[id] = Math.round(+n.value) || 2; update(); };
+        t1.appendChild(c); t3.appendChild(n);
+        tr.append(t1, el('td', '', esc(PRE[id].name)), t3, el('td', 'hint', 'frames')); animTable.appendChild(tr);
+      }
+      facesLab.hidden = faces.hidden = st.mode !== 'side';
+    }
+    const hasAuto = () => MODES[st.mode].dirs.some((n) => st.src[n][0] === 'a');
+    function problems() {
+      const dirs = MODES[st.mode].dirs, kind = (n) => st.src[n][0];
+      if (!dirs.some((n) => kind(n) === 'f')) return 'At least one direction must use a frame you drew.';
+      for (const n of dirs) {
+        const k = kind(n), ref = st.src[n].slice(2);
+        if (k === 'a' && kind(ref) !== 'f') return `${DIR_LABEL[n]} turns from ${DIR_LABEL[ref]}, which must be a drawn frame.`;
+        if (k === 'm' && kind(ref) === 'm') return `${DIR_LABEL[n]} mirrors ${DIR_LABEL[ref]}, which is itself a mirror.`;
+      }
+      if (!SET_ANIMS.some(([id]) => st.on[id])) return 'Tick at least one animation.';
+      return '';
+    }
+    function update() {
+      const dirs = MODES[st.mode].dirs, anims = SET_ANIMS.filter(([id]) => st.on[id]);
+      const frames = anims.reduce((a, [id]) => a + st.n[id], 0) * dirs.length, rows = anims.length * dirs.length;
+      const autos = dirs.filter((n) => st.src[n][0] === 'a').length;
+      summary.innerHTML = `<b>${anims.length}</b> animations × <b>${dirs.length}</b> directions = <b>${rows}</b> rows<br><b>${frames}</b> frames in total<br>Sheet ≈ ${Math.max(...anims.map(([id]) => st.n[id]), 1) * d.w} × ${rows * d.h} px<br><br>Tags: <span style="color:var(--fg)">${anims.slice(0, 2).map(([id]) => dirs.slice(0, 2).map((n) => id + '_' + n).join(', ')).join(', ')}…</span>`
+        + (autos ? `<br><br>${autos} view${autos > 1 ? 's are' : ' is'} <b>auto-generated</b>; check them in the _pose_ frames afterwards.` : '');
+      warn.textContent = problems();
+      poseOnlyLab.hidden = poseOnlyRow.hidden = !hasAuto();
+      if (!hasAuto()) poseOnlyRow.checked = false;
+    }
+    poseOnlyRow.onchange = () => { ok.textContent = poseOnlyRow.checked ? 'Make rough poses' : 'Generate all'; };
+    mode.onchange = () => { st.mode = mode.value; st.src = defaults(); st.on.jump = st.mode === 'side'; renderTables(); update(); };
+    faces.onchange = () => { st.faces = faces.value; st.src = defaults(); renderTables(); update(); };
+    mode.onchange(); // top-down starts without a jump
+
+    const foot = el('div', 'foot'), cancel = el('button', '', 'Cancel'), ok = el('button', 'ok', 'Generate all');
+    foot.append(cancel, ok); dlg.appendChild(foot); modal.appendChild(dlg);
+    mode.value = 'side'; st.mode = 'side'; st.on.jump = true; st.src = defaults(); renderTables(); update();
+
+    const go = await new Promise((resolve) => {
+      const close = (v) => { modal.hidden = true; modal.innerHTML = ''; document.removeEventListener('keydown', onKey, true); resolve(v); };
+      const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } e.stopPropagation(); };
+      document.addEventListener('keydown', onKey, true);
+      cancel.onclick = () => close(false);
+      ok.onclick = () => { if (!problems()) close(true); };
+      modal.onmousedown = (e) => { if (e.target === modal) close(false); };
+    });
+    if (!go) return;
+
+    const dirs = MODES[st.mode].dirs.map((name) => {
+      const [k, v] = [st.src[name][0], st.src[name].slice(2)];
+      return { name, source: k === 'f' ? { frame: +v } : k === 'm' ? { mirror: v } : { auto: v } };
+    });
+    const primary = dirs.find((x) => x.source.frame === cur) || dirs.find((x) => x.source.frame !== undefined);
+    const poseOnly = poseOnlyRow.checked && hasAuto();
+    const list = poseOnly ? [] : SET_ANIMS.filter(([id]) => st.on[id]).map(([id, , ms]) => ({ id, count: st.n[id], ms }));
+    const ctx = { ...ed.ctx(), frame: primary.source.frame };
+    const rig = SM.anim.rigFor(d, primary.source.frame);
+    const res = SM.gen.fullSet(ctx, list, { strength: +strength.value, method: method.value, flash: flash.checked, rig, dirs });
+    ed.adopt(res);
+    msg(poseOnly ? 'Rough poses added as _pose_ frames at the end. Paint over them, then run Full set again: they are picked up automatically.'
+      : `${list.length * dirs.length} animation rows created — File ▸ Export ▸ Godot package`);
   }
 
   async function liftSelection() {

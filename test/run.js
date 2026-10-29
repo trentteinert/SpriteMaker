@@ -1,6 +1,6 @@
 // Dependency-free tests for the pure modules: node test/run.js
 globalThis.SM = {};
-for (const f of ['util', 'transform', 'doc', 'generate', 'anim', 'gif']) require('../js/' + f + '.js');
+for (const f of ['util', 'transform', 'doc', 'generate', 'anim', 'gif', 'zip', 'godot']) require('../js/' + f + '.js');
 const SM = globalThis.SM;
 let failed = 0;
 function test(name, fn) {
@@ -233,6 +233,65 @@ test('fullSet lays out every animation back to back with its own tag', () => {
   eq(d.tags, [{ name: 'idle', from: 1, to: 4 }, { name: 'walk', from: 5, to: 10 }, { name: 'jump', from: 11, to: 18 }]);
   eq([d.frames[1].duration, d.frames[6].duration, d.frames[12].duration], [200, 100, 90]);
   h.undo(); eq([d.frames.length, d.tags.length], [1, 0]);
+});
+function asym() { // 3 layers, deliberately lopsided so mirroring is detectable
+  const d = new SM.Doc(40, 40); d.layers[0].name = 'body'; d.addLayer('arm'); d.addLayer('head');
+  const P = (l, x0, y0, x1, y1) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) d.celW(0, l).set(R, (y * 40 + x) * 4); };
+  P(0, 16, 16, 21, 30); P(1, 22, 17, 24, 25); P(2, 16, 9, 21, 15); P(2, 22, 11, 23, 12);
+  return d;
+}
+test('fullSet side view: mirrored direction is the exact mirror about the feet axis', () => {
+  const d = asym(), h = new SM.History(d), rig = SM.anim.rigFor(d, 0);
+  SM.gen.fullSet({ doc: d, hist: h, frame: 0, layer: 0, sel: null }, [{ id: 'idle', count: 4, ms: 200 }, { id: 'walk', count: 6, ms: 100 }],
+    { strength: 100, method: 'nearest', rig, dirs: [{ name: 'right', source: { frame: 0 } }, { name: 'left', source: { mirror: 'right' } }] });
+  eq(d.tags.map((t) => t.name), ['idle_right', 'idle_left', 'walk_right', 'walk_left']);
+  const r = d.tags[2], l = d.tags[3], fx = rig.feet.x;
+  for (let i = 0; i < 6; i++) {
+    const a = SM.bounds(d.frames[r.from + i].cels[0], 40, 40), b = SM.bounds(d.frames[l.from + i].cels[0], 40, 40);
+    eq([b.w, b.h, b.y], [a.w, a.h, a.y]);
+    eq(Math.round(b.x * 2 + b.w), Math.round(2 * (2 * fx) - (a.x * 2 + a.w))); // centre mirrored about fx
+  }
+});
+test('fullSet top-down 8 directions: auto turns become _pose_ frames, every animation gets every direction', () => {
+  const d = asym(), h = new SM.History(d), rig = SM.anim.rigFor(d, 0);
+  const dirs = [['down', { frame: 0 }], ['down_right', { auto: 'down' }], ['right', { auto: 'down' }], ['up_right', { auto: 'down' }], ['up', { auto: 'down' }],
+    ['up_left', { mirror: 'up_right' }], ['left', { mirror: 'right' }], ['down_left', { mirror: 'down_right' }]].map(([name, source]) => ({ name, source }));
+  SM.gen.fullSet({ doc: d, hist: h, frame: 0, layer: 0, sel: null }, [{ id: 'idle', count: 4, ms: 200 }, { id: 'walk', count: 6, ms: 100 }, { id: 'attack', count: 6, ms: 80 }],
+    { strength: 100, method: 'nearest', rig, dirs });
+  const names = d.tags.map((t) => t.name);
+  eq(names.filter((n) => n[0] === '_'), ['_pose_down_right', '_pose_right', '_pose_up_right', '_pose_up']);
+  eq(names.filter((n) => n[0] !== '_').length, 3 * 8);
+  eq(names.filter((n) => n[0] !== '_').slice(0, 9), ['idle_down', 'idle_down_right', 'idle_right', 'idle_up_right', 'idle_up', 'idle_up_left', 'idle_left', 'idle_down_left', 'walk_down']);
+  eq(d.frames.length, 1 + 4 + 8 * (4 + 6 + 6));
+  const pose = d.tags.find((t) => t.name === '_pose_right'), b = SM.bounds(SM.anim.flatten(d, d.frames[pose.from].cels), 40, 40);
+  if (!(b.w < 8)) throw new Error('right view of a turned sprite should be narrow, got ' + b.w); // 90 degrees: only the thickness shows
+  h.undo(); eq([d.frames.length, d.tags.length], [1, 0]);
+});
+test('front view walks by stepping, side view by swinging', () => {
+  const d = new SM.Doc(24, 40); d.layers[0].name = 'body'; d.addLayer('leg');
+  for (let y = 10; y < 22; y++) for (let x = 9; x < 15; x++) d.celW(0, 0).set(R, (y * 24 + x) * 4);
+  for (let y = 22; y < 32; y++) for (let x = 11; x < 13; x++) d.celW(0, 1).set(R, (y * 24 + x) * 4);
+  const rig = SM.anim.rigFor(d, 0), mk = (view) => SM.anim.build(d, 0, 'walk', { count: 8, ms: 100, dir: 1, view, fv: 1, method: 'nearest' }, rig);
+  const xs = (fr) => fr.map((f) => { const b = SM.bounds(f.cels[1], 24, 40); return b.x + b.w / 2; });
+  const spreadX = (a) => Math.max(...a) - Math.min(...a);
+  if (!(spreadX(xs(mk('side'))) > 3)) throw new Error('side legs should swing sideways');
+  if (!(spreadX(xs(mk('front'))) < 1.01)) throw new Error('front legs should not move sideways: ' + xs(mk('front')));
+  const ys = mk('front').map((f) => SM.bounds(f.cels[1], 24, 40).y);
+  if (!(Math.max(...ys) - Math.min(...ys) >= 2)) throw new Error('front legs should step up and down: ' + ys);
+});
+test('godot SpriteFrames text has atlas regions, relative durations and loop flags', () => {
+  const t = SM.godot.spriteFrames([{ name: 'walk_down', loop: true, durations: [100, 100, 200], rects: [{ x: 0, y: 0, w: 32, h: 32 }, { x: 32, y: 0, w: 32, h: 32 }, { x: 64, y: 0, w: 32, h: 32 }] },
+    { name: 'death_down', loop: false, durations: [90], rects: [{ x: 0, y: 32, w: 32, h: 32 }] }], 'res://sprites/hero.png');
+  for (const want of ['format=3', 'load_steps=6', 'type="SpriteFrames"', 'path="res://sprites/hero.png"', 'region = Rect2(32, 0, 32, 32)', '"duration": 2.0', '"loop": true', '"loop": false', '&"walk_down"', '"speed": 10.0', 'animations = ['])
+    if (!t.includes(want)) throw new Error('missing ' + want + '\n' + t);
+  const sc = SM.godot.scene('Hero', 'res://sprites/hero.tres', 'idle_down', { x: 0, y: -4 });
+  if (!sc.includes('type="AnimatedSprite2D"') || !sc.includes('offset = Vector2(0, -4)') || !sc.includes('&"idle_down"')) throw new Error(sc);
+  eq([SM.godot.isLooping('walk_up'), SM.godot.isLooping('idle'), SM.godot.isLooping('attack_left')], [true, true, false]);
+});
+test('zip writer produces an archive other tools can read', () => {
+  const z = SM.zip([{ name: 'a.txt', data: 'hello' }, { name: 'dir/b.bin', data: new Uint8Array([1, 2, 3, 4, 5]) }]);
+  require('fs').writeFileSync(process.env.ZIP_OUT || '/dev/null', z);
+  eq(String.fromCharCode(z[0], z[1]), 'PK');
 });
 test('gif encoder emits a valid-looking file', () => {
   const f = [make(4, 4, [[1, 1]]), make(4, 4, [[2, 2]])];

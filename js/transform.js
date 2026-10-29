@@ -246,11 +246,11 @@
   // Each layer sits `spacing` voxels behind the next one. opt.mode 'rounded'
   // inflates every pixel into a lens up to `thickness` deep (thin at the
   // silhouette edge); 'flat' extrudes it as a constant-thickness slab.
-  // Returns { vox: Uint32Array (x + w*(y + h*z)), w, h, D }.
+  // Returns { vox: Uint32Array (x + w*(y + h*z)), lay: Uint8Array of layer index + 1, w, h, D }.
   SM.buildVoxels = function (slices, w, h, opt) {
     const n = slices.length, thick = Math.max(1, opt.thickness), spacing = opt.spacing || 0;
     const D = Math.ceil(spacing * (n - 1) + thick) + 2;
-    const vox = new Uint32Array(w * h * D);
+    const vox = new Uint32Array(w * h * D), lay = new Uint8Array(w * h * D);
     const R = thick / 2;
     slices.forEach((s, li) => {
       const z0 = (li - (n - 1) / 2) * spacing, u = SM.u32(s);
@@ -267,23 +267,19 @@
           half = Math.max(half, 0.5);
           let a = Math.ceil(z0 - half + D / 2 - 0.5), b = Math.floor(z0 + half + D / 2 - 0.5);
           if (b < a) a = b = Math.floor(z0 + D / 2);
-          for (let z = Math.max(0, a); z <= Math.min(D - 1, b); z++) vox[x + w * (y + h * z)] = c;
+          for (let z = Math.max(0, a); z <= Math.min(D - 1, b); z++) { vox[x + w * (y + h * z)] = c; lay[x + w * (y + h * z)] = li + 1; }
         }
       }
     });
-    return { vox, w, h, D };
+    return { vox, lay, w, h, D };
   };
 
-  // Renders the model after turning it by `angle` degrees about the vertical
-  // axis through x = cx (continuous pixel coordinates). At 0 degrees the camera
-  // sees the original front view; the front turns toward the viewer's right for
-  // positive angles. shade < 1 darkens faces that face sideways.
-  SM.renderTurn = function (model, angle, cx, shade) {
+  // Casts one ray per pixel through the model after turning it by `angle` degrees about the
+  // vertical axis through x = cx. hit(pixelIndex, voxelIndex, sideFacing) is called for visible voxels.
+  function castTurn(model, angle, cx, hit) {
     const { vox, w, h, D } = model;
     const rad = (angle * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
-    const out = new Uint32Array(w * h), outB = new Uint8ClampedArray(out.buffer);
-    const reach = Math.hypot(Math.max(cx, w - cx), D / 2) + 1;
-    const step = 0.5, k = shade === undefined ? 1 : shade;
+    const reach = Math.hypot(Math.max(cx, w - cx), D / 2) + 1, step = 0.5;
     for (let py = 0; py < h; py++) {
       for (let px = 0; px < w; px++) {
         const u = px + 0.5 - cx;
@@ -292,19 +288,32 @@
           const X = u * c - wv * s, Z = u * s + wv * c;
           const ix = Math.floor(cx + X), iz = Math.floor(Z + D / 2);
           if (ix < 0 || ix >= w || iz < 0 || iz >= D) { pix = ix; piz = iz; continue; }
-          const col = vox[ix + w * (py + h * iz)];
-          if (col) {
-            out[py * w + px] = col;
-            if (k < 1 && pix !== ix && piz === iz) {
-              const o = (py * w + px) * 4;
-              outB[o] *= k; outB[o + 1] *= k; outB[o + 2] *= k;
-            }
-            break;
-          }
+          const vi = ix + w * (py + h * iz);
+          if (vox[vi]) { hit(py * w + px, vi, pix !== ix && piz === iz); break; }
           pix = ix; piz = iz;
         }
       }
     }
-    return outB;
+  }
+  const darken = (col, k) => {
+    if (k >= 1) return col;
+    const r = Math.round((col & 255) * k), g = Math.round(((col >>> 8) & 255) * k), b = Math.round(((col >>> 16) & 255) * k);
+    return ((col >>> 24) << 24 | b << 16 | g << 8 | r) >>> 0;
+  };
+
+  // Renders the model turned by `angle` degrees about the vertical axis through x = cx. At 0 degrees
+  // the camera sees the original front view; the front turns toward the viewer's right for positive
+  // angles. shade < 1 darkens faces that face sideways.
+  SM.renderTurn = function (model, angle, cx, shade) {
+    const out = new Uint32Array(model.w * model.h), k = shade === undefined ? 1 : shade;
+    castTurn(model, angle, cx, (pi, vi, side) => { out[pi] = side ? darken(model.vox[vi], k) : model.vox[vi]; });
+    return new Uint8ClampedArray(out.buffer);
+  };
+
+  // Like renderTurn but keeps parts separate: returns one RGBA buffer per source layer.
+  SM.renderTurnLayers = function (model, nLayers, angle, cx, shade) {
+    const outs = Array.from({ length: nLayers }, () => new Uint32Array(model.w * model.h)), k = shade === undefined ? 1 : shade;
+    castTurn(model, angle, cx, (pi, vi, side) => { outs[model.lay[vi] - 1][pi] = side ? darken(model.vox[vi], k) : model.vox[vi]; });
+    return outs.map((o) => new Uint8ClampedArray(o.buffer));
   };
 })(globalThis);

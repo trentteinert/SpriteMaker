@@ -49,10 +49,11 @@
     const s = o.scale, pad = o.pad, cw = doc.w * s, ch = doc.h * s;
     let cells; // [{ f: frame index, col, row, name }]
     let cols, rows;
-    if (o.layout === 'tags' && doc.tags.length) {
+    const tags = doc.tags.filter((t) => t.name[0] !== '_'); // "_" tags are working poses, not animations
+    if (o.layout === 'tags' && tags.length) {
       cells = [];
-      doc.tags.forEach((t, r) => { for (let f = t.from; f <= t.to; f++) cells.push({ f, col: f - t.from, row: r, name: t.name + '_' + (f - t.from) }); });
-      cols = Math.max(...doc.tags.map((t) => t.to - t.from + 1)); rows = doc.tags.length;
+      tags.forEach((t, r) => { for (let f = t.from; f <= t.to; f++) cells.push({ f, col: f - t.from, row: r, name: t.name + '_' + (f - t.from) }); });
+      cols = Math.max(...tags.map((t) => t.to - t.from + 1)); rows = tags.length;
     } else {
       const [a, b] = io.frameRange(doc, o.tag), n = b - a + 1;
       cols = o.layout === 'row' || o.layout === 'tags' ? n : o.layout === 'column' ? 1 : Math.min(n, Math.max(1, o.cols));
@@ -67,24 +68,45 @@
       for (let y = 0; y < ch; y++) sheet.set(img.subarray(y * cw * 4, (y + 1) * cw * 4), ((oy + y) * W + ox) * 4);
       frames.push({ filename: c.name, frame: { x: ox, y: oy, w: cw, h: ch }, duration: doc.frames[c.f].duration });
     }
-    const byTag = o.layout === 'tags' && doc.tags.length;
+    const byTag = o.layout === 'tags' && tags.length;
     const json = {
       frames,
       meta: {
         app: 'SpriteMaker', size: { w: W, h: H }, scale: String(s), frameSize: { w: cw, h: ch },
         pivot: { x: doc.pivot.x * s, y: doc.pivot.y * s },
         frameTags: byTag
-          ? doc.tags.map((t) => ({ name: t.name, from: 0, to: t.to - t.from, direction: 'forward' }))
+          ? tags.map((t) => ({ name: t.name, from: 0, to: t.to - t.from, direction: 'forward' }))
           : doc.tags.map((t) => ({ name: t.name, from: t.from - cells[0].f, to: t.to - cells[0].f, direction: 'forward' })).filter((t) => t.from >= 0 && t.to < cells.length),
         // Engine-friendly summary: row, frame rectangles and per-frame timing for each animation.
-        animations: byTag ? Object.fromEntries(doc.tags.map((t, r) => [t.name, {
-          row: r, frames: t.to - t.from + 1, loop: ['idle', 'walk', 'run'].includes(t.name),
+        animations: byTag ? Object.fromEntries(tags.map((t, r) => [t.name, {
+          row: r, frames: t.to - t.from + 1, loop: SM.godot.isLooping(t.name),
           durations: doc.frames.slice(t.from, t.to + 1).map((fr) => fr.duration),
           rects: Array.from({ length: t.to - t.from + 1 }, (_, i) => ({ x: pad + i * (cw + pad), y: pad + r * (ch + pad), w: cw, h: ch })),
         }])) : undefined,
       },
     };
     return { blob: await toBlob(canvasOf(sheet, W, H)), json };
+  };
+
+  // Godot 4 package: sprite sheet PNG + SpriteFrames .tres + AnimatedSprite2D .tscn + JSON, as one zip.
+  // o: { scale, pad, name, resDir (e.g. "res://sprites/") }.
+  io.godotPackage = async function (doc, o) {
+    const sheet = await io.sheet(doc, { layout: 'tags', scale: o.scale, pad: o.pad, name: o.name });
+    const anims = sheet.json.meta.animations;
+    if (!anims) throw new Error('Add at least one tag (animation) first');
+    const dir = o.resDir.endsWith('/') ? o.resDir : o.resDir + '/';
+    const list = Object.entries(anims).map(([name, a]) => ({ name, loop: a.loop, durations: a.durations, rects: a.rects }));
+    const s = o.scale, cell = sheet.json.meta.frameSize;
+    const offset = { x: cell.w / 2 - (doc.pivot.x + 0.5) * s, y: cell.h / 2 - (doc.pivot.y + 0.5) * s };
+    const node = o.name.replace(/[^A-Za-z0-9_]/g, '_') || 'Sprite';
+    const png = new Uint8Array(await sheet.blob.arrayBuffer());
+    const files = [
+      { name: o.name + '.png', data: png },
+      { name: o.name + '.tres', data: SM.godot.spriteFrames(list, dir + o.name + '.png') },
+      { name: o.name + '.tscn', data: SM.godot.scene(node, dir + o.name + '.tres', list[0].name, offset) },
+      { name: o.name + '.json', data: JSON.stringify(sheet.json, null, 2) },
+    ];
+    return new Blob([SM.zip(files)], { type: 'application/zip' });
   };
 
   io.gif = function (doc, o) {

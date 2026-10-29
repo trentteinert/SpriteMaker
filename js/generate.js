@@ -136,14 +136,65 @@
     return { frame: ctx.frame + 1, layer: ctx.layer, sel: null };
   };
 
-  // Whole sprite set in one go: every entry of `list` ({ id, count, ms }) is generated from the current
-  // frame and laid out one after another, each with its own tag. o: { dir, strength, method, rig, flash }.
+  // Whole sprite set in one go. `list` is [{ id, count, ms }] (animations); o: { dir, strength, method,
+  // flash, rig, thickness, dirs }. Without o.dirs a single direction is made from the current frame.
+  // o.dirs = [{ name, source }] where name is a key of SM.anim.DIR and source is one of
+  //   { frame: n }          a drawn pose,
+  //   { mirror: 'right' }   the same animation flipped,
+  //   { auto: 'down' }      a rough 3D turn of another direction's pose (also kept as a `_pose_<name>` frame).
+  // Frames are appended at the end, animation by animation, each with all of its directions and a tag
+  // `<anim>_<direction>` (or just `<anim>`).
   gen.fullSet = function (ctx, list, o) {
+    const d = ctx.doc, anim = SM.anim, w = d.w, h = d.h;
     ctx.hist.commit();
-    rememberRig(ctx.doc, o.rig);
-    let at = ctx.frame + 1;
-    for (const e of list) at += insertPreset(ctx, e.id, { ...o, count: e.count, ms: e.ms, tagName: e.id }, at);
-    return { frame: ctx.frame + 1, layer: ctx.layer, sel: null };
+    rememberRig(d, o.rig);
+    const dirs = o.dirs || [{ name: null, source: { frame: ctx.frame } }];
+    const infoOf = (name) => (name ? anim.DIR[name] : { view: 'side', dir: o.dir || 1, fv: 1 });
+    const srcs = {}, bases = [], rigFor = (cels, primary) => (primary ? o.rig : { ...anim.rigForCels(d, cels, false), roles: o.rig.roles });
+
+    for (const dr of dirs) { // drawn poses
+      if (dr.source.frame === undefined) continue;
+      const cels = d.frames[dr.source.frame].cels.slice();
+      srcs[dr.name] = { cels, rig: rigFor(cels, dr.source.frame === ctx.frame) };
+    }
+    const models = {};
+    for (const dr of dirs) { // rough 3D turns
+      if (!dr.source.auto) continue;
+      const from = srcs[dr.source.auto];
+      if (!from) throw new Error(`Direction ${dr.name} turns from ${dr.source.auto}, which has no drawn pose`);
+      const key = dr.source.auto;
+      if (!models[key]) models[key] = SM.buildVoxels(from.cels, w, h, { thickness: o.thickness || Math.max(2, Math.round(from.rig.width * 0.5)), spacing: 0, mode: 'rounded' });
+      const cels = SM.renderTurnLayers(models[key], d.layers.length, anim.DIR[dr.name].angle - anim.DIR[key].angle, from.rig.feet.x, 1);
+      srcs[dr.name] = { cels, rig: rigFor(cels, false) };
+      bases.push({ tag: '_pose_' + dr.name, frames: [{ cels, duration: 100 }] });
+    }
+
+    const made = {}, blocks = [];
+    const flip = (c, fx) => SM.translate(SM.flipH(c, w, h), w, h, Math.round(2 * fx - w), 0);
+    for (const a of list) {
+      for (const dr of dirs) { // everything that is not a mirror first
+        if (dr.source.mirror) continue;
+        const i = infoOf(dr.name), sr = srcs[dr.name];
+        made[a.id + '|' + dr.name] = anim.buildFrom(d, sr.cels, a.id, { count: a.count, ms: a.ms, dir: i.dir, view: i.view, fv: i.fv, strength: o.strength, method: o.method, flash: o.flash }, sr.rig);
+      }
+      for (const dr of dirs) {
+        if (dr.source.mirror) {
+          const from = made[a.id + '|' + dr.source.mirror], fx = srcs[dr.source.mirror].rig.feet.x;
+          made[a.id + '|' + dr.name] = from.map((f) => ({ cels: f.cels.map((c) => flip(c, fx)), duration: f.duration }));
+        }
+        blocks.push({ tag: dr.name ? `${a.id}_${dr.name}` : a.id, frames: made[a.id + '|' + dr.name] });
+      }
+    }
+    const first = d.frames.length;
+    for (const blk of [...bases, ...blocks]) {
+      const from = d.frames.length;
+      blk.frames.forEach((f) => {
+        const idx = d.addFrame(d.frames.length, null, f.duration);
+        f.cels.forEach((c, l) => d.setCel(idx, l, c));
+      });
+      d.tags.push({ name: blk.tag, from, to: d.frames.length - 1 });
+    }
+    return { frame: first, layer: ctx.layer, sel: null };
   };
 
   // Appends the frames in reverse (excluding both ends) so a clip plays forward then back.
