@@ -222,6 +222,31 @@
       this.sel = { x, y, w, h };
       this.emit('sel'); this.touch();
     }
+    // Moves the selected pixels of this frame onto a new layer above the active one.
+    liftToLayer(name, role) {
+      if (!this.sel) return false;
+      const d = this.doc, r = this.sel, w = d.w;
+      let any = false;
+      const c0 = this.cel();
+      for (let y = Math.max(0, r.y); y < Math.min(d.h, r.y + r.h) && !any; y++) {
+        for (let x = Math.max(0, r.x); x < Math.min(w, r.x + r.w); x++) if (c0[(y * w + x) * 4 + 3]) { any = true; break; }
+      }
+      if (!any) return false; // nothing inside the selection
+      this.commit();
+      const src = this.celW();
+      const nl = d.addLayer(name || 'Part', this.layer + 1), dst = d.celW(this.frame, nl);
+      for (let y = Math.max(0, r.y); y < Math.min(d.h, r.y + r.h); y++) {
+        for (let x = Math.max(0, r.x); x < Math.min(w, r.x + r.w); x++) {
+          const i = (y * w + x) * 4;
+          dst.set(src.subarray(i, i + 4), i);
+          src.fill(0, i, i + 4);
+        }
+      }
+      if (role) d.layers[nl].role = role;
+      this.sel = null; // the source layer stays active so the next part can be lifted straight away
+      this.emit('structure'); this.touch();
+      return true;
+    }
     // Shift the selection (or the whole cel) by whole pixels.
     nudge(dx, dy) {
       this.commit();
@@ -398,6 +423,13 @@
       g.strokeStyle = '#ff2bd6'; g.lineWidth = 2;
       g.beginPath(); g.arc(px, py, pr, 0, Math.PI * 2); g.moveTo(px - pr * 1.6, py); g.lineTo(px + pr * 1.6, py);
       g.moveTo(px, py - pr * 1.6); g.lineTo(px, py + pr * 1.6); g.stroke();
+
+      const J = doc.layers[this.layer] && doc.layers[this.layer].joint;
+      if (J) { // joint of the active layer (animation starter)
+        const jx = ox + J.x * z, jy = oy + J.y * z;
+        g.strokeStyle = '#2bd9ff'; g.lineWidth = 2; g.beginPath();
+        g.arc(jx, jy, 5, 0, Math.PI * 2); g.moveTo(jx - 8, jy); g.lineTo(jx + 8, jy); g.moveTo(jx, jy - 8); g.lineTo(jx, jy + 8); g.stroke();
+      }
 
       const c = this.cursor;
       if (c && !this.pan && !this.spaceDown && this.inside(c.x, c.y)) {

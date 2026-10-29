@@ -222,7 +222,7 @@
   SM.serialize = function (doc) {
     return {
       format: 'spritemaker', version: 1, w: doc.w, h: doc.h, pivot: doc.pivot,
-      palette: doc.palette, tags: doc.tags, layers: doc.layers,
+      palette: doc.palette, tags: doc.tags, layers: doc.layers.map((l) => ({ ...l })),
       frames: doc.frames.map((f) => ({
         duration: f.duration,
         cels: f.cels.map((c) => (SM.bounds(c, doc.w, doc.h) ? SM.b64encode(c) : null)),
@@ -233,7 +233,12 @@
   SM.deserialize = function (o) {
     if (!o || o.format !== 'spritemaker') throw new Error('Not a SpriteMaker project');
     const d = new Doc(o.w, o.h);
-    d.layers = o.layers.map((l) => ({ name: l.name, visible: l.visible !== false, opacity: l.opacity === undefined ? 255 : l.opacity }));
+    d.layers = o.layers.map((l) => {
+      const n = { name: l.name, visible: l.visible !== false, opacity: l.opacity === undefined ? 255 : l.opacity };
+      if (l.role) n.role = l.role;
+      if (l.joint) n.joint = { ...l.joint };
+      return n;
+    });
     d.frames = o.frames.map((f) => ({
       duration: f.duration || 100,
       cels: f.cels.map((c) => (c ? SM.b64decode(c) : SM.blank(o.w, o.h))),

@@ -135,3 +135,18 @@ main { display: grid; grid-template-columns: 46px 1fr 236px; min-height: 0; }
 .tl-lname[draggable=true] { cursor: grab; }
 .tl-lname.drop-above { box-shadow: inset 0 3px 0 var(--accent2); }
 .tl-lname.drop-below { box-shadow: inset 0 -3px 0 var(--accent2); }
+
+.dlg.wide { width: min(900px, 96vw); }
+.starter { display: grid; grid-template-columns: 1fr 270px; gap: 14px; padding: 12px 16px; }
+.starter .fields { display: grid; grid-template-columns: 130px 1fr; gap: 8px 10px; align-items: center; align-content: start; }
+.starter .fields p { grid-column: 1 / -1; margin: 0; color: var(--dim); line-height: 1.45; }
+.starter .fields input[type=number], .starter .fields select { width: 100%; }
+.starter h4 { grid-column: 1 / -1; margin: 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--dim); }
+.starter table { grid-column: 1 / -1; border-collapse: collapse; width: 100%; }
+.starter td { padding: 2px 3px; } .starter td:first-child { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.starter td input { width: 56px; } .starter td select { width: 100%; }
+.starter .pv { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.starter .pvbox { width: 258px; height: 258px; display: grid; place-items: center; border-radius: 4px; overflow: hidden;
+  background: repeating-conic-gradient(var(--check1) 0 25%, var(--check2) 0 50%) 0 0 / 16px 16px; }
+.starter canvas { image-rendering: pixelated; }
+.starter .warn { color: var(--accent); }

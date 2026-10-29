@@ -29,6 +29,23 @@ Your work is autosaved in the browser; **File ▸ Save project** writes a `.spri
   in pseudo-3D (stacked-sprite technique) with adjustable slice spacing and camera tilt.
 * Rotate 90°, flip H/V, canvas resize with anchor, crop to content.
 
+## Animation starter (idle → walk / run / jump / attack / hurt / death)
+**Generate ▸ Animation starter** (or the ★ Animate button) builds key-pose frames from your finished idle sprite.
+It follows how pixel artists actually work: split the character into parts, pose each key frame with integer-pixel
+moves and crisp rotation, then paint over the result to clean it up. It does *not* try to replace hand polish.
+
+1. **Split the sprite into parts**: with the Select tool (M) select the head, press **J** (Lift selection to new layer),
+   name it; repeat for arms, legs and a weapon. The original layer stays active so you can keep lifting. Layers named
+   head/arm/leg/sword… get their role guessed (add "far" or "back" for the far-side limbs).
+2. **Open the starter**: pick an animation, frames, speed, facing and strength. A live preview plays in the dialog, and the
+   rig view shows each part's joint. Edit roles and joints in the table, or Shift+click with the Pivot tool.
+3. **Generate**: new frames are inserted after the current one and tagged. Onion skin turns on. Play with Enter and paint over the poses.
+
+Presets use standard key poses: walk = contact/down/passing/up with counter-swinging arms; run = bigger swing, lean and a bounce;
+jump = crouch, launch stretch, peak, fall stretch, landing squash; attack = windup, strike with a lunge, follow-through;
+hurt = recoil with optional white flash; death = topple about the feet; idle = breathing. Frame counts default to common
+starting points (walk 6, run 6, jump 8, attack 6, hurt 4, death 8) and are adjustable. Leave empty canvas around the sprite for jumps and falls.
+
 ## Animation tools
 * **Generate ▸ Motion tween**: select a part (an arm, a leg) and generate frames that interpolate move + rotate
   with easing, either one-way or as a seamless loop. With no selection it animates the whole layer (body bob).

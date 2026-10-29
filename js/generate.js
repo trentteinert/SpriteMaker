@@ -116,6 +116,21 @@
     return { frame: src, layer: L, sel: ctx.sel };
   };
 
+  // Animation starter: poses the layers (as body parts) into the frames of a preset and inserts
+  // them after the current frame. o.rig = { roles, joints } is remembered on the layers.
+  gen.animStarter = function (ctx, id, o) {
+    const d = ctx.doc, src = ctx.frame, rig = o.rig;
+    const frames = SM.anim.build(d, src, id, o, rig);
+    ctx.hist.commit();
+    d.layers.forEach((L, l) => { L.role = rig.roles[l]; L.joint = { ...rig.joints[l] }; });
+    frames.forEach((f, i) => {
+      const idx = d.addFrame(src + 1 + i, null, f.duration);
+      f.cels.forEach((c, l) => d.setCel(idx, l, c));
+    });
+    d.tags.push({ name: o.tagName || id, from: src + 1, to: src + frames.length });
+    return { frame: src + 1, layer: ctx.layer, sel: null };
+  };
+
   // Appends the frames in reverse (excluding both ends) so a clip plays forward then back.
   gen.pingPong = function (ctx) {
     const d = ctx.doc, n = d.frames.length;

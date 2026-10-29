@@ -185,6 +185,20 @@
     return out;
   };
 
+  // Nearest-neighbour scale about (cx, cy): used for squash & stretch.
+  SM.scaleAbout = function (src, w, h, sx, sy, cx, cy) {
+    const s = SM.u32(src), out = new Uint32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const py = Math.floor(cy + (y + 0.5 - cy) / sy + 1e-6);
+      if (py < 0 || py >= h) continue;
+      for (let x = 0; x < w; x++) {
+        const px = Math.floor(cx + (x + 0.5 - cx) / sx + 1e-6);
+        if (px >= 0 && px < w) out[y * w + x] = s[py * w + px];
+      }
+    }
+    return new Uint8ClampedArray(out.buffer);
+  };
+
   // ---- Side-view turn: give a sprite depth and spin it around its vertical axis ----
 
   // Distance from each opaque pixel centre to the nearest transparent pixel

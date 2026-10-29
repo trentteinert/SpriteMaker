@@ -76,18 +76,17 @@
       up() {},
     },
 
+    // Click sets the sprite pivot; Shift+click sets the joint of the active layer (used by the animation starter).
     pivot: {
-      down(ed, p) {
+      set(ed, p, final) {
         if (!ed.inside(p.x, p.y)) return;
-        ed.commit();
-        ed.doc.pivot = { x: p.x, y: p.y };
+        if (final) ed.commit();
+        if (ed.drag.shift) ed.doc.layers[ed.layer].joint = { x: p.x + 0.5, y: p.y + 0.5 };
+        else ed.doc.pivot = { x: p.x, y: p.y };
         ed.touch();
       },
-      move(ed, p) {
-        if (!ed.inside(p.x, p.y)) return;
-        ed.doc.pivot = { x: p.x, y: p.y };
-        ed.touch();
-      },
+      down(ed, p) { this.set(ed, p, true); },
+      move(ed, p) { this.set(ed, p, false); },
       up() {},
     },
 

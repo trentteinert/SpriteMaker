@@ -1,6 +1,6 @@
 // Dependency-free tests for the pure modules: node test/run.js
 globalThis.SM = {};
-for (const f of ['util', 'transform', 'doc', 'generate', 'gif']) require('../js/' + f + '.js');
+for (const f of ['util', 'transform', 'doc', 'generate', 'anim', 'gif']) require('../js/' + f + '.js');
 const SM = globalThis.SM;
 let failed = 0;
 function test(name, fn) {
@@ -158,6 +158,63 @@ test('turn generator adds a Turn layer, frames and hides sources', () => {
   const r = SM.gen.turn({ doc: d, hist: h, frame: 0, layer: 0, sel: null }, { count: 8, total: 360, direction: 'right', thickness: 4, spacing: 0, shape: 'rounded', pivot: 'doc', hideSlices: true, tag: true, shade: true });
   eq(d.frames.length, 8); eq(d.layers[1].name, 'Turn'); eq(d.layers[0].visible, false); eq(r.layer, 1);
   eq(Array.from(d.cel(0, 1)), Array.from(d.cel(0, 0)));
+});
+// ---- animation starter ----
+function stickman() { // 3 layers on a 32x32 canvas: body, near leg, head
+  const d = new SM.Doc(32, 32);
+  d.layers[0].name = 'body'; d.addLayer('leg'); d.addLayer('head');
+  const P = (l, x0, y0, x1, y1) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) d.celW(0, l).set(R, (y * 32 + x) * 4); };
+  P(0, 14, 12, 17, 20); P(1, 15, 21, 16, 28); P(2, 14, 6, 17, 11);
+  return d;
+}
+test('guessRole reads layer names', () => {
+  eq(['Head', 'arm far', 'Left Leg', 'sword', 'torso', 'shadow'].map(SM.anim.guessRole), ['head', 'armF', 'legF', 'weapon', 'body', 'fixed']);
+});
+test('rigFor finds feet, scale and joints', () => {
+  const d = stickman(), rig = SM.anim.rigFor(d, 0);
+  eq(rig.roles, ['body', 'legN', 'head']);
+  eq(rig.feet, { x: 16, y: 29 }); eq(rig.joints[1], { x: 16, y: 21 }); eq(rig.joints[2], { x: 16, y: 12 });
+});
+test('walk: near leg swings toward the facing direction at contact', () => {
+  const d = stickman(), rig = SM.anim.rigFor(d, 0);
+  for (const dir of [1, -1]) {
+    const f = SM.anim.build(d, 0, 'walk', { count: 6, ms: 100, dir, method: 'nearest' }, rig)[0];
+    const b = SM.bounds(f.cels[1], 32, 32), footX = b.x + b.w / 2;
+    if (dir * (footX - 16) <= 1) throw new Error('dir ' + dir + ' foot at ' + footX);
+  }
+});
+test('walk loops: N frames, durations, first frame differs from the idle only by pose', () => {
+  const d = stickman(), rig = SM.anim.rigFor(d, 0), fr = SM.anim.build(d, 0, 'walk', { count: 8, ms: 90, dir: 1, method: 'rotsprite' }, rig);
+  eq(fr.length, 8); eq(fr.every((f) => f.duration === 90 && f.cels.length === 3), true);
+  eq(Array.from(fr[0].cels[0]), Array.from(d.cel(0, 0)), 'torso does not move at contact');
+});
+test('jump peaks higher than idle and squashes on landing', () => {
+  const d = stickman(); d.resize(32, 48, 0.5, 1); // headroom above the sprite
+  const rig = SM.anim.rigFor(d, 0), fr = SM.anim.build(d, 0, 'jump', { count: 11, ms: 80, dir: 1, method: 'nearest' }, rig);
+  const heightOf = (cels) => SM.bounds(SM.anim.flatten(d, cels), d.w, d.h);
+  const idle = heightOf(d.frames[0].cels), peak = Math.min(...fr.map((f) => heightOf(f.cels).y));
+  if (!(peak <= idle.y - 8)) throw new Error('peak y ' + peak + ' idle y ' + idle.y);
+  const lb = heightOf(fr[fr.length - 2].cels);
+  if (!(lb.h < idle.h)) throw new Error('landing height ' + lb.h + ' vs ' + idle.h);
+  eq(heightOf(fr[0].cels), idle); eq(heightOf(fr[fr.length - 1].cels), idle);
+});
+test('hurt flash whitens the first frame only; strength 0 leaves the sprite untouched', () => {
+  const d = stickman(), rig = SM.anim.rigFor(d, 0);
+  const fr = SM.anim.build(d, 0, 'hurt', { count: 4, ms: 90, dir: 1, method: 'nearest', flash: true }, rig);
+  const whites = (c) => { let n = 0; for (let i = 0; i < c.length; i += 4) if (c[i + 3] && c[i + 1] === 255) n++; return n; };
+  eq(whites(fr[0].cels[2]) > 0 && fr[0].cels.every((c) => whites(c) === c.filter((v, i) => i % 4 === 3 && v).length), true);
+  eq(fr.slice(1).every((f) => f.cels.every((c) => whites(c) === 0)), true);
+  const z = SM.anim.build(d, 0, 'attack', { count: 6, ms: 80, dir: 1, method: 'nearest', strength: 0 }, rig);
+  eq(z.every((f) => f.cels.every((c, l) => JSON.stringify(Array.from(c)) === JSON.stringify(Array.from(d.cel(0, l))))), true);
+});
+test('animStarter inserts frames after the source, tags them and remembers the rig', () => {
+  const d = stickman(), h = new SM.History(d), rig = SM.anim.rigFor(d, 0);
+  const r = SM.gen.animStarter({ doc: d, hist: h, frame: 0, layer: 0, sel: null }, 'run', { count: 6, ms: 70, dir: 1, method: 'nearest', rig, tagName: 'run' });
+  eq(d.frames.length, 7); eq(d.tags[0], { name: 'run', from: 1, to: 6 }); eq(r.frame, 1);
+  eq(d.layers[1].role, 'legN'); eq(d.frames[3].duration, 70);
+  const e = SM.deserialize(JSON.parse(JSON.stringify(SM.serialize(d))));
+  eq(e.layers[1].role, 'legN'); eq(e.layers[1].joint, { x: 16, y: 21 });
+  h.undo(); eq(d.frames.length, 1);
 });
 test('gif encoder emits a valid-looking file', () => {
   const f = [make(4, 4, [[1, 1]]), make(4, 4, [[2, 2]])];

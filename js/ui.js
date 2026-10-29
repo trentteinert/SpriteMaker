@@ -242,6 +242,8 @@
       o.querySelector('input').onpointerdown = () => ed.commit();
       g = grp();
       g.style.borderRight = '0';
+      const b9 = btn(g, '★ Animate', 'Animation starter: walk, run, jump, attack… from your idle sprite', () => dlgStarter());
+      b9.style.cssText = 'border-color: var(--accent); color: var(--accent); font-weight: 600';
       const b0 = btn(g, '⟲ Side turn', 'Spin a side/front-view sprite in 3D', () => dlgTurn());
       const b1 = btn(g, '⟳ Top-down', 'In-plane rotation frames (top-down sprites)', () => dlgTurntable());
       const b2 = btn(g, '≣ Stack', 'Top-down stacked slices rotating', () => dlgStack());
@@ -308,7 +310,7 @@
       const n = put(el('div', 'tl-lname' + (l === ed.layer ? ' sel' : '')), row, 1);
       const eye = el('span', 'eye' + (L.visible ? '' : ' off'), L.visible ? '👁' : '◌'); eye.title = 'Show / hide layer';
       eye.onclick = (e) => { e.stopPropagation(); ed.commit(); L.visible = !L.visible; ed.emit('structure'); ed.touch(); };
-      const nm = el('span', 'nm', esc(L.name)); nm.title = 'Double-click to rename';
+      const nm = el('span', 'nm', esc(L.name) + (L.role ? ` <small style="color:var(--dim)">· ${L.role}</small>` : '')); nm.title = 'Double-click to rename';
       n.append(eye, nm);
       n.onclick = () => ed.setLayer(l);
       n.draggable = true;
@@ -554,6 +556,121 @@
     ed.adopt(res);
   }
 
+  // ---------------------------------------------------------------- animation starter
+  async function dlgStarter() {
+    const d = ed.doc, src = ed.frame, PRE = SM.anim.PRESETS;
+    if (!d.frames[src].cels.some((c) => SM.bounds(c, d.w, d.h))) { msg('Draw your idle sprite on this frame first'); return; }
+    ed.stop();
+    const rig = SM.anim.rigFor(d, src);
+    const st = { id: 'walk', count: PRE.walk.count, ms: PRE.walk.ms, dir: 1, strength: 100, method: 'rotsprite', flash: true };
+    const modal = $('#modal');
+    modal.innerHTML = ''; modal.hidden = false;
+    const dlg = el('div', 'dlg wide');
+    dlg.appendChild(el('h2', '', 'Animation starter — build an animation from your idle sprite'));
+    const root = el('div', 'starter'), f = el('div', 'fields'), pv = el('div', 'pv');
+    root.append(f, pv); dlg.appendChild(root);
+
+    const add = (label, inp) => { f.appendChild(el('label', 'k', label)); f.appendChild(inp); return inp; };
+    const sel = (opts, val) => { const x = el('select'); for (const [v, t] of opts) { const o = el('option', '', esc(t)); o.value = v; x.appendChild(o); } x.value = val; return x; };
+    const num = (val, min, max, step) => { const x = el('input'); x.type = 'number'; x.value = val; x.min = min; x.max = max; if (step) x.step = step; return x; };
+
+    const info = el('p', '', ''); f.appendChild(info);
+    const preset = add('Animation', sel(Object.entries(PRE).map(([k, v]) => [k, v.name]), st.id));
+    const count = add('Frames', num(st.count, 2, 24));
+    const ms = add('Frame time (ms)', num(st.ms, 20, 1000, 10));
+    const dir = add('Character faces', sel([[1, 'Right'], [-1, 'Left']], 1));
+    const strength = add('Strength (%)', num(st.strength, 10, 250, 10));
+    const method = add('Rotation method', sel(METHODS, st.method));
+    const flashRow = el('input'); flashRow.type = 'checkbox'; flashRow.checked = true; flashRow.style.justifySelf = 'start';
+    const flashLab = el('label', 'k', 'White flash on hit'); f.append(flashLab, flashRow);
+    const warn = el('p', 'warn', ''); f.appendChild(warn);
+
+    f.appendChild(el('h4', '', 'Body parts (one per layer) — each part rotates around its joint'));
+    const table = el('table'); f.appendChild(table);
+    for (let l = d.layers.length - 1; l >= 0; l--) {
+      const tr = el('tr'), role = sel(SM.anim.ROLES, rig.roles[l]), jx = num(rig.joints[l].x, 0, d.w, 0.5), jy = num(rig.joints[l].y, 0, d.h, 0.5);
+      role.onchange = () => { rig.roles[l] = role.value; refresh(); };
+      jx.oninput = () => { rig.joints[l].x = parseFloat(jx.value) || 0; refresh(); };
+      jy.oninput = () => { rig.joints[l].y = parseFloat(jy.value) || 0; refresh(); };
+      for (const [x, label] of [[el('span', '', esc(d.layers[l].name)), ''], [role], [jx], [jy]]) { const td = el('td'); td.appendChild(x); tr.appendChild(td); }
+      table.appendChild(tr);
+    }
+    f.appendChild(el('p', 'hint', 'Roles are guessed from the layer names. Joints are in canvas pixels (x, y). Tip: with the Pivot tool, Shift+click sets the active layer’s joint.'));
+
+    pv.appendChild(el('div', 'hint', 'Rig (joints)'));
+    const rigBox = el('div', 'pvbox'), rigCv = el('canvas'); rigBox.appendChild(rigCv); pv.appendChild(rigBox);
+    pv.appendChild(el('div', 'hint', 'Live preview'));
+    const pvBox = el('div', 'pvbox'), pvCv = el('canvas'); pvBox.appendChild(pvCv); pv.appendChild(pvBox);
+    const foot = el('div', 'foot'), cancel = el('button', '', 'Cancel'), ok = el('button', 'ok', 'Generate frames');
+    foot.append(cancel, ok); dlg.appendChild(foot); modal.appendChild(dlg);
+
+    const zoom = Math.max(1, Math.floor(250 / Math.max(d.w, d.h)));
+    for (const c of [rigCv, pvCv]) { c.width = d.w; c.height = d.h; c.style.width = d.w * zoom + 'px'; c.style.height = d.h * zoom + 'px'; }
+    const showImg = (cv, data) => cv.getContext('2d').putImageData(new ImageData(data, d.w, d.h), 0, 0);
+    const COLORS = { head: '#ffd23b', armN: '#ff5c6c', armF: '#ff9aa5', legN: '#4fd1c5', legF: '#8be8de', weapon: '#c58bff' };
+
+    let frames = [], fi = 0, timer = 0, buildTimer = 0, closed = false;
+    const opts = () => ({ count: Math.round(+count.value) || 2, ms: +ms.value || 100, dir: +dir.value, strength: +strength.value, method: method.value, flash: flashRow.checked, rig });
+    function drawRig() {
+      showImg(rigCv, d.composite(src));
+      const g = rigCv.getContext('2d');
+      d.layers.forEach((_, l) => {
+        const col = COLORS[rig.roles[l]]; if (!col) return;
+        g.fillStyle = col; g.fillRect(Math.floor(rig.joints[l].x) - 0, Math.floor(rig.joints[l].y) - 0, 1, 1);
+      });
+    }
+    function build() {
+      const o = opts();
+      frames = SM.anim.build(d, src, st.id, o, rig).map((fr) => ({ data: SM.anim.flatten(d, fr.cels), duration: fr.duration }));
+      fi = 0;
+    }
+    function tick() {
+      clearTimeout(timer);
+      if (closed || !frames.length) return;
+      showImg(pvCv, frames[fi % frames.length].data);
+      timer = setTimeout(() => { fi++; tick(); }, Math.max(30, frames[fi % frames.length].duration));
+    }
+    function refresh() { drawRig(); clearTimeout(buildTimer); buildTimer = setTimeout(() => { build(); tick(); }, 120); }
+    function applyPreset() {
+      const p = PRE[st.id = preset.value];
+      count.value = p.count; ms.value = p.ms;
+      info.innerHTML = esc(p.info);
+      const hasFlash = !!p.flash; flashRow.hidden = flashLab.hidden = !hasFlash;
+      const limbs = rig.roles.some((r) => /^(arm|leg)/.test(r));
+      warn.textContent = (limbs ? '' : 'Only one body part is set up, so the whole sprite moves as one piece. Use the Select tool and J (lift to new layer) to split off the head, arms and legs. ')
+        + (/jump|death|attack/.test(st.id) ? 'Leave empty canvas around the sprite — movement is clipped at the edges (Sprite ▸ Canvas size).' : '');
+      refresh();
+    }
+    preset.onchange = applyPreset;
+    for (const x of [count, ms, dir, strength, method, flashRow]) { x.oninput = refresh; x.onchange = refresh; }
+    applyPreset();
+
+    const result = await new Promise((resolve) => {
+      const close = (v) => { closed = true; clearTimeout(timer); clearTimeout(buildTimer); modal.hidden = true; modal.innerHTML = ''; document.removeEventListener('keydown', onKey, true); resolve(v); };
+      const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } e.stopPropagation(); };
+      document.addEventListener('keydown', onKey, true);
+      cancel.onclick = () => close(null);
+      ok.onclick = () => close(opts());
+      modal.onmousedown = (e) => { if (e.target === modal) close(null); };
+    });
+    if (!result) return;
+    result.tagName = st.id;
+    ed.adopt(SM.gen.animStarter(ed.ctx(), st.id, result));
+    msg(`${PRE[st.id].name}: ${result.count} frames added — play them with Enter, then paint over the poses to clean them up`);
+    if (!ed.onion.on) { ed.onion.on = true; syncChecks(); ed.requestDraw(); }
+  }
+
+  async function liftSelection() {
+    if (!ed.sel) { msg('Select an area first (M), then press J to lift it onto its own layer'); return; }
+    const r = await form('Lift selection to a new layer', [
+      { type: 'info', text: 'Splits a body part (head, arm, leg…) off onto its own layer so the Animation starter can move it.' },
+      { key: 'name', label: 'Part name', type: 'text', value: 'part' },
+      { key: 'role', label: 'Role', type: 'select', value: '', options: [['', 'Guess from name'], ...SM.anim.ROLES] },
+    ], 'Lift');
+    if (!r) return;
+    if (!ed.liftToLayer(r.name || 'part', r.role || undefined)) msg('Nothing to lift: the selection is empty on the active layer');
+  }
+
   async function dlgTween() {
     const r = await form('Motion tween', [
       { type: 'info', text: ed.sel ? 'Animates the <b>selection</b> (e.g. an arm or a leg) over new frames.' : 'No selection: animates the whole <b>active layer</b> (e.g. a body bob). Make a selection first to animate just one part.' },
@@ -583,7 +700,7 @@
 
   const act = (fn) => () => ed.adopt(fn());
   const SHORTCUTS = [
-    ['Tools', 'B pencil · E eraser · L line · R rectangle · O ellipse · G fill · I eyedropper · M select · P pivot · H pan'],
+    ['Tools', 'B pencil · E eraser · L line · R rectangle · O ellipse · G fill · I eyedropper · M select · P pivot (Shift+click = layer joint) · H pan · J lift selection to a new layer'],
     ['Drawing', 'Left button = foreground, right button = background · Alt+click = eyedropper · Shift = straight / square · [ ] brush size'],
     ['View', 'Wheel = zoom · Space+drag or middle mouse = pan · + − zoom · 0 fit'],
     ['Edit', 'Ctrl+Z undo · Ctrl+Shift+Z / Ctrl+Y redo · Ctrl+C/X/V · Ctrl+A select all · Ctrl+D deselect · Delete clears · Arrows nudge selection (or layer)'],
@@ -597,7 +714,8 @@
     ['Edit', [
       ['Undo', () => ed.undo(), 'Ctrl+Z'], ['Redo', () => ed.redo(), 'Ctrl+Y'], '-',
       ['Cut', () => ed.cut(), 'Ctrl+X'], ['Copy', () => ed.copy(), 'Ctrl+C'], ['Paste', () => ed.paste(), 'Ctrl+V'], ['Clear', () => ed.clearSelection(), 'Del'], '-',
-      ['Select all', () => ed.selectAll(), 'Ctrl+A'], ['Deselect', () => ed.deselect(), 'Ctrl+D'],
+      ['Select all', () => ed.selectAll(), 'Ctrl+A'], ['Deselect', () => ed.deselect(), 'Ctrl+D'], '-',
+      ['Lift selection to new layer…', liftSelection, 'J'],
     ]],
     ['Sprite', [
       ['Canvas size…', dlgCanvasSize], ['Crop to content', cropContent], '-',
@@ -611,6 +729,7 @@
       ['New tag…', () => tagDialog()], ['Play / pause', () => ed.toggle(), 'Enter'],
     ]],
     ['Generate', [
+      ['Animation starter (walk, run, jump, attack…)…', dlgStarter], '-',
       ['Side-view turn (3D, for side/front sprites)…', dlgTurn], ['Top-down rotation frames (in-plane)…', dlgTurntable], ['Top-down stack rotation (layers as height)…', dlgStack], '-', ['Motion tween (limb / bob)…', dlgTween],
     ]],
     ['View', [
@@ -654,6 +773,7 @@
       return;
     }
     if (e.altKey) { if (k === 'n') { e.preventDefault(); frameOp('new'); } return; }
+    if (k === 'j') { liftSelection(); return; }
     if (KEYS[k]) { ed.setTool(KEYS[k]); return; }
     switch (e.key) {
       case 'x': case 'X': swap(); break;
